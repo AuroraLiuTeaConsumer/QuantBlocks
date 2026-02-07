@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { StrategyCanvas } from "./StrategyCanvas";
 import type { StrategyNode, StrategyEdge } from "@/lib/strategy/graphTypes";
+import { StrategyGraphSchema } from "@/lib/strategy/graphTypes";
 
 export type StrategyWorkspaceStrategy = {
   id: string;
@@ -18,9 +19,10 @@ export type StrategyWorkspaceStrategy = {
 export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStrategy }) {
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const nodes = Array.isArray(strategy.nodes) ? (strategy.nodes as StrategyNode[]) : [];
-  const edges = Array.isArray(strategy.edges) ? (strategy.edges as StrategyEdge[]) : [];
-
+  const parsed = StrategyGraphSchema.safeParse({ nodes: strategy.nodes, edges: strategy.edges });
+  const nodes = parsed.success ? parsed.data.nodes as StrategyNode[] : [];
+  const edges = parsed.success ? parsed.data.edges : [];
+  
   return (
     <main className="h-screen flex flex-col max-w-full">
       <header className="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">

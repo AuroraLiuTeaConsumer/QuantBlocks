@@ -97,13 +97,20 @@ function FlowCanvas({
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = setTimeout(() => {
       autosaveTimerRef.current = null;
-      if (nodes.length > 0 || edges.length > 0) save();
+      save();
     }, DEBOUNCE_MS);
     return () => {
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     };
-  }, [nodes, edges]); // eslint-disable-line react-hooks/exhaustive-deps -- only trigger on graph change
+  }, [nodes, edges, save]); 
 
+  useEffect(() => {
+    setNodes(initialNodes as Node[]);
+    setEdges(initialEdges as Edge[]);
+    hasUserChangedRef.current = false;
+    setSaveStatus("idle");
+  }, [initialNodes, initialEdges, setNodes, setEdges]);
+  
   const onNodesChangeWithDirty = useCallback(
     (changes: Parameters<typeof onNodesChange>[0]) => {
       hasUserChangedRef.current = true;

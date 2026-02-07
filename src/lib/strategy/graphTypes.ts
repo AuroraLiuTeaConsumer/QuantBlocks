@@ -14,11 +14,22 @@ export const RsiNodeData = z.object({
   period: z.number().int().positive().default(14),
 });
 
-export const CompareNodeData = z.object({
-  op: z.enum([">", "<", ">=", "<=", "=="]),
-  rightType: z.enum(["number", "series"]).default("number"),
-  rightValue: z.number().optional(),
-});
+export const CompareNodeData = z
+  .object({
+    op: z.enum([">", "<", ">=", "<=", "=="]),
+    rightType: z.enum(["number", "series"]).default("number"),
+    rightValue: z.number().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.rightType === "number" && typeof val.rightValue !== "number") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "compare.rightValue is required when rightType is 'number'",
+        path: ["rightValue"],
+      });
+    }
+  });
+
 
 export const CrossNodeData = z.object({
   direction: z.enum(["crossUp", "crossDown"]),
@@ -93,12 +104,26 @@ export const ACTION_NODE_TYPES: NodeType[] = ["open_position", "close_position",
 // React Flow node / edge schemas
 // ---------------------------------------------------------------------------
 
-export const StrategyNodeSchema = z.object({
+const BaseNode = z.object({
   id: z.string(),
-  type: z.enum(NODE_TYPES),
   position: z.object({ x: z.number(), y: z.number() }),
-  data: z.record(z.unknown()),
 });
+
+export const StrategyNodeSchema = z.discriminatedUnion("type", [
+  BaseNode.extend({ type: z.literal("price"), data: PriceNodeData }),
+  BaseNode.extend({ type: z.literal("volume"), data: VolumeNodeData }),
+  BaseNode.extend({ type: z.literal("rsi"), data: RsiNodeData }),
+  BaseNode.extend({ type: z.literal("compare"), data: CompareNodeData }),
+  BaseNode.extend({ type: z.literal("cross"), data: CrossNodeData }),
+  BaseNode.extend({ type: z.literal("and"), data: AndNodeData }),
+  BaseNode.extend({ type: z.literal("or"), data: OrNodeData }),
+  BaseNode.extend({ type: z.literal("not"), data: NotNodeData }),
+  BaseNode.extend({ type: z.literal("constant"), data: ConstantNodeData }),
+  BaseNode.extend({ type: z.literal("open_position"), data: OpenPositionNodeData }),
+  BaseNode.extend({ type: z.literal("close_position"), data: ClosePositionNodeData }),
+  BaseNode.extend({ type: z.literal("set_risk"), data: SetRiskNodeData }),
+]);
+
 
 export const StrategyEdgeSchema = z.object({
   id: z.string(),
@@ -110,7 +135,7 @@ export const StrategyEdgeSchema = z.object({
 });
 
 export const StrategyGraphSchema = z.object({
-  nodes: z.array(StrategyNodeSchema).min(1),
+  nodes: z.array(StrategyNodeSchema),
   edges: z.array(StrategyEdgeSchema),
 });
 

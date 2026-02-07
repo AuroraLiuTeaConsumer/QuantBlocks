@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { StrategyCanvas } from "./StrategyCanvas";
 import { AiPromptPanel } from "./AiPromptPanel";
+import { BacktestPanel } from "./BacktestPanel";
 import { StrategyGraphSchema } from "@/lib/strategy/graphTypes";
 import type { StrategyGraph, StrategyNode, StrategyEdge } from "@/lib/strategy/graphTypes";
 import { useRef } from "react";
@@ -33,6 +34,7 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
   const [draftGraph, setDraftGraph] = useState<StrategyGraph | null>(null);
   const [appliedGraph, setAppliedGraph] = useState<StrategyGraph | null>(null);
   const [saveRequestKey, setSaveRequestKey] = useState<number | undefined>(undefined);
+  const [isCanvasSaving, setIsCanvasSaving] = useState(false);
 
   const parsedFromServer = useMemo(
     () => parseStrategyGraph(strategy),
@@ -112,24 +114,31 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
           onDraft={setDraftGraph}
           onError={setSaveError}
         />
-        <div className="min-w-0 flex-1 flex flex-col">
-          <StrategyCanvas
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1">
+            <StrategyCanvas
             strategyId={strategy.id}
             initialNodes={initialNodes}
             initialEdges={initialEdges}
             onSaveSuccess={() => {
               setSaveError(null);
-              prevGraphRef.current = null; // confirm
+              prevGraphRef.current = null;
+              setAppliedGraph(null);
             }}
             onSaveError={(msg) => {
               setSaveError(msg);
-              // rollback UI if apply-triggered save failed
               if (prevGraphRef.current) {
                 setAppliedGraph(prevGraphRef.current);
                 prevGraphRef.current = null;
               }
             }}
+            onSavingChange={setIsCanvasSaving}
             saveRequestKey={saveRequestKey}
+            />
+          </div>
+          <BacktestPanel
+            strategyId={strategy.id}
+            disableRun={isCanvasSaving}
           />
         </div>
       </div>

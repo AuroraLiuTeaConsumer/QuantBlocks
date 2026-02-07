@@ -54,6 +54,7 @@ function FlowCanvas({
   initialEdges,
   onSaveSuccess,
   onSaveError,
+  onSavingChange,
   saveRequestKey,
 }: {
   strategyId: string;
@@ -61,12 +62,16 @@ function FlowCanvas({
   initialEdges: StrategyEdge[];
   onSaveSuccess?: () => void;
   onSaveError?: (message: string) => void;
+  onSavingChange?: (saving: boolean) => void;
   /** When this value changes, one save is triggered (e.g. after Apply draft). */
   saveRequestKey?: number;
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes as Node[]);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges as Edge[]);
   const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    onSavingChange?.(saving);
+  }, [saving, onSavingChange]);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasUserChangedRef = useRef(false);
@@ -222,6 +227,7 @@ export function StrategyCanvas({
   initialEdges,
   onSaveSuccess,
   onSaveError,
+  onSavingChange,
   saveRequestKey,
 }: {
   strategyId: string;
@@ -229,6 +235,7 @@ export function StrategyCanvas({
   initialEdges: StrategyEdge[];
   onSaveSuccess?: () => void;
   onSaveError?: (message: string) => void;
+  onSavingChange?: (saving: boolean) => void;
   saveRequestKey?: number;
 }) {
   return (
@@ -239,6 +246,7 @@ export function StrategyCanvas({
         initialEdges={initialEdges}
         onSaveSuccess={onSaveSuccess}
         onSaveError={onSaveError}
+        onSavingChange={onSavingChange}
         saveRequestKey={saveRequestKey}
       />
     </ReactFlowProvider>

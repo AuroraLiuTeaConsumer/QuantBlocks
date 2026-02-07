@@ -6,6 +6,7 @@ import { StrategyCanvas } from "./StrategyCanvas";
 import { AiPromptPanel } from "./AiPromptPanel";
 import { StrategyGraphSchema } from "@/lib/strategy/graphTypes";
 import type { StrategyGraph, StrategyNode, StrategyEdge } from "@/lib/strategy/graphTypes";
+import { useRef } from "react";
 
 export type StrategyWorkspaceStrategy = {
   id: string;
@@ -46,8 +47,12 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
     setAppliedGraph(null);
   }, [strategy.id]);
 
+  const prevGraphRef = useRef<StrategyGraph | null>(null);
+  
   const handleApplyDraft = () => {
     if (!draftGraph) return;
+    setSaveError(null);
+    prevGraphRef.current = displayGraph; 
     setAppliedGraph(draftGraph);
     setDraftGraph(null);
     setSaveRequestKey((k) => (k ?? 0) + 1);
@@ -56,6 +61,7 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
   const handleCancelDraft = () => {
     setDraftGraph(null);
   };
+  
 
   return (
     <main className="flex h-screen max-w-full flex-col">
@@ -111,8 +117,18 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
             strategyId={strategy.id}
             initialNodes={initialNodes}
             initialEdges={initialEdges}
-            onSaveSuccess={() => setSaveError(null)}
-            onSaveError={setSaveError}
+            onSaveSuccess={() => {
+              setSaveError(null);
+              prevGraphRef.current = null; // confirm
+            }}
+            onSaveError={(msg) => {
+              setSaveError(msg);
+              // rollback UI if apply-triggered save failed
+              if (prevGraphRef.current) {
+                setAppliedGraph(prevGraphRef.current);
+                prevGraphRef.current = null;
+              }
+            }}
             saveRequestKey={saveRequestKey}
           />
         </div>

@@ -54,12 +54,15 @@ function FlowCanvas({
   initialEdges,
   onSaveSuccess,
   onSaveError,
+  saveRequestKey,
 }: {
   strategyId: string;
   initialNodes: StrategyNode[];
   initialEdges: StrategyEdge[];
   onSaveSuccess?: () => void;
   onSaveError?: (message: string) => void;
+  /** When this value changes, one save is triggered (e.g. after Apply draft). */
+  saveRequestKey?: number;
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes as Node[]);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges as Edge[]);
@@ -67,6 +70,7 @@ function FlowCanvas({
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasUserChangedRef = useRef(false);
+  const lastSaveRequestKeyRef = useRef(saveRequestKey ?? -1);
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -110,7 +114,38 @@ function FlowCanvas({
     hasUserChangedRef.current = false;
     setSaveStatus("idle");
   }, [initialNodes, initialEdges, setNodes, setEdges]);
-  
+
+  // One-time save when parent requests it (e.g. after Apply draft). Persist the incoming graph (initialNodes/initialEdges), not current state, so we don't rely on sync effect order.
+  useEffect(() => {
+    const key = saveRequestKey ?? -1;
+    if (key !== lastSaveRequestKeyRef.current && key >= 0) {
+      lastSaveRequestKeyRef.current = key;
+      (async () => {
+        setSaving(true);
+        setSaveStatus("idle");
+        try {
+          const res = await persistGraph(strategyId, initialNodes as Node[], initialEdges as Edge[]);
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            const message = body.details?.length
+              ? body.details.map((e: { message?: string }) => e.message).join("; ")
+              : body.error ?? "Save failed";
+            setSaveStatus("error");
+            onSaveError?.(message);
+            return;
+          }
+          setSaveStatus("saved");
+          onSaveSuccess?.();
+        } catch (err) {
+          setSaveStatus("error");
+          onSaveError?.(err instanceof Error ? err.message : "Save failed");
+        } finally {
+          setSaving(false);
+        }
+      })();
+    }
+  }, [saveRequestKey, strategyId, initialNodes, initialEdges, onSaveSuccess, onSaveError]);
+
   const onNodesChangeWithDirty = useCallback(
     (changes: Parameters<typeof onNodesChange>[0]) => {
       hasUserChangedRef.current = true;
@@ -187,12 +222,14 @@ export function StrategyCanvas({
   initialEdges,
   onSaveSuccess,
   onSaveError,
+  saveRequestKey,
 }: {
   strategyId: string;
   initialNodes: StrategyNode[];
   initialEdges: StrategyEdge[];
   onSaveSuccess?: () => void;
   onSaveError?: (message: string) => void;
+  saveRequestKey?: number;
 }) {
   return (
     <ReactFlowProvider>
@@ -202,6 +239,7 @@ export function StrategyCanvas({
         initialEdges={initialEdges}
         onSaveSuccess={onSaveSuccess}
         onSaveError={onSaveError}
+        saveRequestKey={saveRequestKey}
       />
     </ReactFlowProvider>
   );

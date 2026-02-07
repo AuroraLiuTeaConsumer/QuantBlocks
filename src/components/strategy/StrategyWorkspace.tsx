@@ -1,13 +1,12 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import { StrategyCanvas } from "./StrategyCanvas";
 import { AiPromptPanel } from "./AiPromptPanel";
 import { BacktestPanel } from "./BacktestPanel";
 import { StrategyGraphSchema } from "@/lib/strategy/graphTypes";
 import type { StrategyGraph, StrategyNode, StrategyEdge } from "@/lib/strategy/graphTypes";
-import { useRef } from "react";
 
 export type StrategyWorkspaceStrategy = {
   id: string;
@@ -35,6 +34,8 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
   const [appliedGraph, setAppliedGraph] = useState<StrategyGraph | null>(null);
   const [saveRequestKey, setSaveRequestKey] = useState<number | undefined>(undefined);
   const [isCanvasSaving, setIsCanvasSaving] = useState(false);
+  const [hasPendingApply, setHasPendingApply] = useState(false);
+
 
   const parsedFromServer = useMemo(
     () => parseStrategyGraph(strategy),
@@ -57,6 +58,7 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
     prevGraphRef.current = displayGraph; 
     setAppliedGraph(draftGraph);
     setDraftGraph(null);
+    setHasPendingApply(true);
     setSaveRequestKey((k) => (k ?? 0) + 1);
   };
 
@@ -124,6 +126,7 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
               setSaveError(null);
               prevGraphRef.current = null;
               setAppliedGraph(null);
+              setHasPendingApply(false);
             }}
             onSaveError={(msg) => {
               setSaveError(msg);
@@ -131,6 +134,7 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
                 setAppliedGraph(prevGraphRef.current);
                 prevGraphRef.current = null;
               }
+              setHasPendingApply(false);
             }}
             onSavingChange={setIsCanvasSaving}
             saveRequestKey={saveRequestKey}
@@ -138,7 +142,7 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
           </div>
           <BacktestPanel
             strategyId={strategy.id}
-            disableRun={isCanvasSaving}
+            disableRun={isCanvasSaving || hasPendingApply}
           />
         </div>
       </div>

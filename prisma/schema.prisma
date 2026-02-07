@@ -1,0 +1,51 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Strategy {
+  id          String        @id @default(uuid())
+  name        String
+  description String?
+  instrument  String        @default("BTC-PERP")
+  timeframe   String        @default("1h")
+  nodes       Json
+  edges       Json
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  backtests   BacktestRun[]
+}
+
+model BacktestRun {
+  id         String   @id @default(uuid())
+  strategyId String
+  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  mode       String   @default("backtest") // "backtest" | "paper"
+  status     String   @default("queued")   // "queued" | "running" | "completed" | "failed"
+  startTime  String?
+  endTime    String?
+  metrics    Json?
+  log        Json?
+  createdAt  DateTime @default(now())
+  trades     Trade[]
+}
+
+model Trade {
+  id          String      @id @default(uuid())
+  runId       String
+  run         BacktestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  side        String      // "long" | "short"
+  entryTime   String
+  entryPrice  Float
+  exitTime    String?
+  exitPrice   Float?
+  qty         Float
+  pnl         Float       @default(0)
+  reasonOpen  Json
+  reasonClose Json?
+  createdAt   DateTime    @default(now())
+}

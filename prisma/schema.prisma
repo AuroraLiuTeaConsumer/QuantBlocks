@@ -17,7 +17,8 @@ model Strategy {
   edges       Json
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
-  backtests   BacktestRun[]
+  backtests      BacktestRun[]
+  paperSessions  PaperSession[]
 }
 
 model BacktestRun {
@@ -48,4 +49,43 @@ model Trade {
   reasonOpen  Json
   reasonClose Json?
   createdAt   DateTime    @default(now())
+}
+
+// ─── Paper Trading ───────────────────────────────────────────
+model PaperSession {
+  id                String       @id @default(uuid())
+  strategyId        String
+  strategy          Strategy     @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  status            String       @default("idle") // "idle" | "running" | "stopped" | "error"
+  instrument        String       @default("BTC-PERP")
+  timeframe         String       @default("1h")
+  lastPrice         Float        @default(100)
+  equity            Float        @default(10000)
+  realizedPnl       Float        @default(0)
+  unrealizedPnl     Float        @default(0)
+  positionSide      String?      // "long" | "short" | null
+  positionQty       Float        @default(0)
+  positionEntryPrice Float?
+  startedAt         DateTime?
+  updatedAt         DateTime     @updatedAt
+  createdAt         DateTime     @default(now())
+  trades            PaperTrade[]
+
+  @@index([strategyId])
+}
+
+model PaperTrade {
+  id         String       @id @default(uuid())
+  sessionId  String
+  session    PaperSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  side       String       // "long" | "short"
+  qty        Float
+  entryTime  DateTime
+  entryPrice Float
+  exitTime   DateTime?
+  exitPrice  Float?
+  pnl        Float        @default(0)
+  createdAt  DateTime     @default(now())
+
+  @@index([sessionId, entryTime])
 }

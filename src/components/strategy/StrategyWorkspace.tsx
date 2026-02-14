@@ -5,8 +5,11 @@ import Link from "next/link";
 import { StrategyCanvas } from "./StrategyCanvas";
 import { AiPromptPanel } from "./AiPromptPanel";
 import { BacktestPanel } from "./BacktestPanel";
+import { PaperTradingPanel } from "./PaperTradingPanel";
 import { StrategyGraphSchema } from "@/lib/strategy/graphTypes";
 import type { StrategyGraph, StrategyNode, StrategyEdge } from "@/lib/strategy/graphTypes";
+
+type BottomTab = "backtest" | "paper";
 
 export type StrategyWorkspaceStrategy = {
   id: string;
@@ -35,6 +38,7 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
   const [saveRequestKey, setSaveRequestKey] = useState<number | undefined>(undefined);
   const [isCanvasSaving, setIsCanvasSaving] = useState(false);
   const [hasPendingApply, setHasPendingApply] = useState(false);
+  const [bottomTab, setBottomTab] = useState<BottomTab>("backtest");
 
 
   const parsedFromServer = useMemo(
@@ -140,11 +144,47 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
             saveRequestKey={saveRequestKey}
             />
           </div>
-          <BacktestPanel
-            strategyId={strategy.id}
-            strategyTimeframe={strategy.timeframe}
-            disableRun={isCanvasSaving || hasPendingApply}
-          />
+          <div className="flex shrink-0 flex-col border-t border-gray-800 bg-[#0f1117]">
+            {/* Tab bar */}
+            <div className="flex gap-0 border-b border-gray-800">
+              <button
+                type="button"
+                onClick={() => setBottomTab("backtest")}
+                className={`px-4 py-2 text-sm font-semibold uppercase tracking-wide transition-colors ${
+                  bottomTab === "backtest"
+                    ? "border-b-2 border-green-500 text-gray-200"
+                    : "text-gray-500 hover:text-gray-300"
+                }`}
+              >
+                Backtest
+              </button>
+              <button
+                type="button"
+                onClick={() => setBottomTab("paper")}
+                className={`px-4 py-2 text-sm font-semibold uppercase tracking-wide transition-colors ${
+                  bottomTab === "paper"
+                    ? "border-b-2 border-blue-500 text-gray-200"
+                    : "text-gray-500 hover:text-gray-300"
+                }`}
+              >
+                Paper Trading
+              </button>
+            </div>
+
+            {bottomTab === "backtest" && (
+              <BacktestPanel
+                strategyId={strategy.id}
+                strategyTimeframe={strategy.timeframe}
+                disableRun={isCanvasSaving || hasPendingApply}
+              />
+            )}
+            {bottomTab === "paper" && (
+              <PaperTradingPanel
+                strategyId={strategy.id}
+                disableRun={isCanvasSaving || hasPendingApply}
+              />
+            )}
+          </div>
         </div>
       </div>
     </main>

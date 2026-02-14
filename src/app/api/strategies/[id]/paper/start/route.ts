@@ -1,25 +1,48 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { toSnapshot } from "@/lib/paper/engine";
+import type { SessionRow } from "@/lib/paper/engine";
 
-// POST /api/strategies/:id/paper/start — stub
+const INITIAL_EQUITY = 10_000;
+const INITIAL_PRICE = 100;
+
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+
   const strategy = await prisma.strategy.findUnique({ where: { id } });
   if (!strategy) {
     return NextResponse.json({ error: "Strategy not found" }, { status: 404 });
   }
 
-  const run = await prisma.backtestRun.create({
+  // If there's already a running session for this strategy, return it
+  const existing = await prisma.paperSession.findFirst({
+    where: { strategyId: id, status: "running" },
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (existing) {
+    return NextResponse.json(toSnapshot(existing as unknown as SessionRow));
+  }
+
+  const session = await prisma.paperSession.create({
     data: {
       strategyId: id,
-      mode: "paper",
       status: "running",
-      startTime: new Date().toISOString(),
+      instrument: strategy.instrument,
+      timeframe: strategy.timeframe,
+      lastPrice: INITIAL_PRICE,
+      equity: INITIAL_EQUITY,
+      realizedPnl: 0,
+      unrealizedPnl: 0,
+      positionSide: null,
+      positionQty: 0,
+      positionEntryPrice: null,
+      startedAt: new Date(),
     },
   });
 
-  return NextResponse.json({ runId: run.id, status: "running", message: "Paper trading started (stub)" });
+  return NextResponse.json(toSnapshot(session as unknown as SessionRow));
 }

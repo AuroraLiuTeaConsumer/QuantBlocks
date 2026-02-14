@@ -386,7 +386,7 @@ export function BacktestPanel({
   const numTrades = metrics?.numberOfTrades as number | undefined;
 
   return (
-    <div className="flex shrink-0 flex-col border-t border-gray-800 bg-[#0f1117]">
+    <div className="flex shrink-0 flex-col">
       {/* Header */}
       <div className="flex items-center justify-between gap-4 border-b border-gray-800 px-4 py-2.5">
         <div className="flex items-center gap-3">

@@ -1,6 +1,11 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  PaperEquityChart,
+  type PaperEquityChartHandle,
+  type ChartMarker,
+} from "./PaperEquityChart";
 
 const POLL_SESSION_MS = 1000;
 const POLL_TRADES_MS = 3000;
@@ -40,6 +45,10 @@ type PaperTrade = {
 };
 
 // ── Helpers ──────────────────────────────────────────────────
+
+function toUTCSec(date: string | Date): number {
+  return Math.floor(new Date(date).getTime() / 1000);
+}
 
 function formatNum(v: number | null | undefined, digits = 2): string {
   if (v == null || !Number.isFinite(v)) return "—";
@@ -108,6 +117,12 @@ export function PaperTradingPanel({
   const sessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tradePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Chart streaming refs
+  const chartRef = useRef<PaperEquityChartHandle>(null);
+  const lastEquityTimeRef = useRef(0);
+  const seenTradeIdsRef = useRef(new Set<string>());
+  const allMarkersRef = useRef<ChartMarker[]>([]);
+
   // Cleanup on unmount
   useEffect(() => {
     mountedRef.current = true;
@@ -116,6 +131,63 @@ export function PaperTradingPanel({
       if (sessionPollRef.current) clearInterval(sessionPollRef.current);
       if (tradePollRef.current) clearInterval(tradePollRef.current);
     };
+  }, []);
+
+  // ── Chart streaming helpers ────────────────────────────────
+
+  const appendEquityFromSnapshot = useCallback((snap: SessionSnapshot) => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const time = toUTCSec(snap.updatedAt);
+    if (time > lastEquityTimeRef.current) {
+      chart.appendEquity({ time, value: snap.equity });
+      lastEquityTimeRef.current = time;
+    }
+  }, []);
+
+  const syncMarkersFromTrades = useCallback((tradeList: PaperTrade[]) => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    let changed = false;
+    for (const t of tradeList) {
+      if (seenTradeIdsRef.current.has(t.id)) continue;
+      seenTradeIdsRef.current.add(t.id);
+      changed = true;
+
+      const isLong = t.side === "long";
+
+      // Entry marker
+      allMarkersRef.current.push({
+        time: toUTCSec(t.entryTime),
+        position: isLong ? "belowBar" : "aboveBar",
+        shape: isLong ? "arrowUp" : "arrowDown",
+        color: isLong ? "#22c55e" : "#ef4444",
+        text: isLong ? "Long" : "Short",
+      });
+
+      // Exit marker (if closed)
+      if (t.exitTime) {
+        allMarkersRef.current.push({
+          time: toUTCSec(t.exitTime),
+          position: isLong ? "aboveBar" : "belowBar",
+          shape: isLong ? "arrowDown" : "arrowUp",
+          color: "#94a3b8",
+          text: "Exit",
+        });
+      }
+    }
+
+    if (changed) {
+      chart.setMarkers(allMarkersRef.current);
+    }
+  }, []);
+
+  const resetChart = useCallback(() => {
+    chartRef.current?.reset();
+    lastEquityTimeRef.current = 0;
+    seenTradeIdsRef.current.clear();
+    allMarkersRef.current = [];
   }, []);
 
   // ── Polling ──────────────────────────────────────────────
@@ -139,6 +211,12 @@ export function PaperTradingPanel({
         const data = (await res.json()) as SessionSnapshot;
         if (!mountedRef.current) return;
         setSession(data);
+
+        // Stream equity to chart
+        if (data.status === "running") {
+          appendEquityFromSnapshot(data);
+        }
+
         if (data.status !== "running") {
           stopPolling();
         }
@@ -146,26 +224,30 @@ export function PaperTradingPanel({
         // Network errors are transient, keep polling
       }
     },
-    [stopPolling],
+    [stopPolling, appendEquityFromSnapshot],
   );
 
-  const pollTrades = useCallback(async (sid: string) => {
-    try {
-      const res = await fetch(`/api/paper/${sid}/trades`);
-      if (!res.ok || !mountedRef.current) return;
-      const data = await res.json();
-      if (Array.isArray(data) && mountedRef.current) {
-        setTrades(data as PaperTrade[]);
+  const pollTrades = useCallback(
+    async (sid: string) => {
+      try {
+        const res = await fetch(`/api/paper/${sid}/trades`);
+        if (!res.ok || !mountedRef.current) return;
+        const data = await res.json();
+        if (Array.isArray(data) && mountedRef.current) {
+          const tradeList = data as PaperTrade[];
+          setTrades(tradeList);
+          syncMarkersFromTrades(tradeList);
+        }
+      } catch {
+        // transient
       }
-    } catch {
-      // transient
-    }
-  }, []);
+    },
+    [syncMarkersFromTrades],
+  );
 
   const startPolling = useCallback(
     (sid: string) => {
       stopPolling();
-      // Immediate first poll
       pollSession(sid);
       pollTrades(sid);
       sessionPollRef.current = setInterval(() => pollSession(sid), POLL_SESSION_MS);
@@ -179,6 +261,7 @@ export function PaperTradingPanel({
   const handleStart = async () => {
     setError(null);
     setLoading(true);
+    resetChart();
     try {
       const res = await fetch(`/api/strategies/${strategyId}/paper/start`, {
         method: "POST",
@@ -194,6 +277,10 @@ export function PaperTradingPanel({
       setSession(snap);
       setTrades([]);
       setLoading(false);
+
+      // Seed chart with initial equity point
+      appendEquityFromSnapshot(snap);
+
       if (snap.status === "running") {
         startPolling(snap.id);
       }
@@ -218,7 +305,7 @@ export function PaperTradingPanel({
       }
       setSession(data as SessionSnapshot);
       stopPolling();
-      // Final trade fetch
+      // Final trade fetch to capture any last trades
       pollTrades(session.id);
     } catch (err) {
       if (mountedRef.current) {
@@ -241,6 +328,7 @@ export function PaperTradingPanel({
       setSession(data as SessionSnapshot);
       setTrades([]);
       stopPolling();
+      resetChart();
     } catch (err) {
       if (mountedRef.current) {
         setError(err instanceof Error ? err.message : "Network error");
@@ -268,6 +356,8 @@ export function PaperTradingPanel({
         return "bg-gray-800 text-gray-500";
     }
   })();
+
+  const showChart = session != null && status !== "idle";
 
   // ── Render ───────────────────────────────────────────────
 
@@ -328,7 +418,14 @@ export function PaperTradingPanel({
       )}
 
       {/* Content */}
-      <div className="max-h-[500px] overflow-y-auto">
+      <div className="max-h-[600px] overflow-y-auto">
+        {/* Equity chart — always mounted when session exists, streaming via ref */}
+        {showChart && (
+          <div className="border-b border-gray-800">
+            <PaperEquityChart ref={chartRef} height={260} />
+          </div>
+        )}
+
         {/* Live Stats */}
         {session && status !== "idle" && (
           <div className="grid grid-cols-3 gap-2 border-b border-gray-800 px-4 py-3 sm:grid-cols-6">

@@ -81,6 +81,7 @@ export async function POST(
         log: JSON.parse(JSON.stringify({
           debugEvents: result.debugEvents,
           equityCurve: result.equityCurve,
+          initialCapital: config.initialCapital,
         })),
       },
     });

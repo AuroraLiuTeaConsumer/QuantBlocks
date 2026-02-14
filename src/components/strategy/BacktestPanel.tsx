@@ -1,10 +1,13 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { EquityChart } from "./EquityChart";
-import type { EquityPoint } from "./EquityChart";
+import { StrategyChart } from "./StrategyChart";
+import type { BarItem, EquityPoint as StrategyEquityPoint } from "./StrategyChart";
 
 const POLL_INTERVAL_MS = 1500;
+
+/** Equity curve from backend or built from trades: time as ISO string, equity as number */
+type EquityPoint = { time: string; equity: number };
 
 type RunStatus = "idle" | "running" | "success" | "error";
 
@@ -12,7 +15,11 @@ type BacktestRun = {
   id: string;
   status: string;
   metrics?: Record<string, unknown> | null;
-  log?: { equityCurve?: EquityPoint[]; error?: string } | null;
+  log?: {
+    equityCurve?: EquityPoint[];
+    error?: string;
+    initialCapital?: number;
+  } | null;
   startTime?: string | null;
   endTime?: string | null;
 };
@@ -87,8 +94,14 @@ function buildEquityCurveFromTrades(
 
   if (closed.length === 0) return [];
 
+  const earliestEntry = closed.reduce((best, t) =>
+    new Date(t.entryTime).getTime() < new Date(best.entryTime).getTime()
+      ? t
+      : best
+  );
+
   const curve: EquityPoint[] = [
-    { time: closed[0].entryTime, equity: initialCapital },
+    { time: earliestEntry.entryTime, equity: initialCapital },
   ];
 
   let equity = initialCapital;
@@ -100,11 +113,50 @@ function buildEquityCurveFromTrades(
   return curve;
 }
 
+/**
+ * Resolve the initial capital used for the backtest when building equity from trades.
+ * Prefer run.log.initialCapital (from backend), then derive from metrics, else fallback.
+ */
+function getInitialCapital(run: BacktestRun): number {
+  const fromLog = run.log?.initialCapital;
+  if (typeof fromLog === "number" && Number.isFinite(fromLog) && fromLog > 0) {
+    return fromLog;
+  }
+  const totalReturnPct = run.metrics?.totalReturnPct as number | undefined;
+  const netPnl = run.metrics?.netPnl as number | undefined;
+  if (
+    typeof totalReturnPct === "number" &&
+    Number.isFinite(totalReturnPct) &&
+    totalReturnPct !== 0 &&
+    typeof netPnl === "number" &&
+    Number.isFinite(netPnl)
+  ) {
+    const derived = (netPnl * 100) / totalReturnPct;
+    if (Number.isFinite(derived) && derived > 0) return derived;
+  }
+  return 10_000;
+}
+
+/** Convert equity curve (ISO time + equity) to StrategyChart format (UTC seconds + value). */
+function toStrategyChartEquity(
+  curve: EquityPoint[]
+): StrategyEquityPoint[] {
+  return curve
+    .filter((p) => p.time != null && p.time !== "")
+    .map((p) => ({
+      time: Math.floor(new Date(p.time).getTime() / 1000),
+      value: p.equity,
+    }))
+    .filter((p) => Number.isFinite(p.time) && Number.isFinite(p.value));
+}
+
 export function BacktestPanel({
   strategyId,
+  strategyTimeframe = "1h",
   disableRun = false,
 }: {
   strategyId: string;
+  strategyTimeframe?: string;
   disableRun?: boolean;
 }) {
   const [status, setStatus] = useState<RunStatus>("idle");
@@ -112,9 +164,18 @@ export function BacktestPanel({
   const [metrics, setMetrics] = useState<Record<string, unknown> | null>(null);
   const [equityCurve, setEquityCurve] = useState<EquityPoint[]>([]);
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [bars, setBars] = useState<BarItem[] | undefined>(undefined);
+  const [barsUnavailable, setBarsUnavailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
+  const strategyIdRef = useRef(strategyId);
+  const strategyTimeframeRef = useRef(strategyTimeframe);
+  const runStrategyIdRef = useRef<string | null>(null);
+  const runStrategyTimeframeRef = useRef<string | null>(null);
+
+  strategyIdRef.current = strategyId;
+  strategyTimeframeRef.current = strategyTimeframe;
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current) {
@@ -141,6 +202,33 @@ export function BacktestPanel({
     [mountedRef]
   );
 
+  const fetchBars = useCallback(
+    async (sid: string, timeframe: string) => {
+      const res = await fetch(
+        `/api/strategies/${sid}/bars?timeframe=${encodeURIComponent(timeframe)}&limit=500`
+      );
+      if (!mountedRef.current) return;
+      // Only apply result if this request still matches the current run (avoids race when switching strategies or running multiple backtests).
+      const stillCurrent =
+        runStrategyIdRef.current === sid &&
+        runStrategyTimeframeRef.current === timeframe;
+      if (!stillCurrent) return;
+      if (!res.ok) {
+        setBars(undefined);
+        setBarsUnavailable(true);
+        return;
+      }
+      const data = await res.json();
+      if (!mountedRef.current) return;
+      if (runStrategyIdRef.current !== sid || runStrategyTimeframeRef.current !== timeframe) return;
+      if (Array.isArray(data)) {
+        setBars(data as BarItem[]);
+        setBarsUnavailable(false);
+      }
+    },
+    []
+  );
+
   const handleRunComplete = useCallback(
     (run: BacktestRun, rid: string) => {
       setMetrics(run.metrics ?? null);
@@ -152,20 +240,26 @@ export function BacktestPanel({
         setEquityCurve(logCurve);
       }
 
+      // Use refs so polling completion (possibly with stale closure) fetches bars for the strategy we ran for
+      const sid = runStrategyIdRef.current ?? strategyIdRef.current;
+      const tf = runStrategyTimeframeRef.current ?? strategyTimeframeRef.current;
+      fetchBars(sid, tf);
+
+      const initialCapital = getInitialCapital(run);
       fetchTrades(rid).then(() => {
         if (!mountedRef.current) return;
         // If no server-side equity curve, build from trades after they load
         if (!Array.isArray(logCurve) || logCurve.length === 0) {
           setTrades((currentTrades) => {
             if (!mountedRef.current) return currentTrades;
-            const curve = buildEquityCurveFromTrades(currentTrades, 10000);
+            const curve = buildEquityCurveFromTrades(currentTrades, initialCapital);
             setEquityCurve(curve);
             return currentTrades;
           });
         }
       });
     },
-    [fetchTrades]
+    [fetchTrades, fetchBars]
   );
 
   const pollRun = useCallback(
@@ -180,9 +274,17 @@ export function BacktestPanel({
       const isFail = run.status === "error" || run.status === "failed";
       if (isDone) {
         stopPolling();
-        if (mountedRef.current) {
-          handleRunComplete(run, rid);
+        if (!mountedRef.current) return;
+        // Run completed for a different strategy than currently viewed; discard result
+        if (
+          strategyIdRef.current !== runStrategyIdRef.current ||
+          strategyTimeframeRef.current !== runStrategyTimeframeRef.current
+        ) {
+          setRunId(null);
+          setStatus("idle");
+          return;
         }
+        handleRunComplete(run, rid);
         return;
       }
       if (isFail) {
@@ -217,6 +319,8 @@ export function BacktestPanel({
     setMetrics(null);
     setEquityCurve([]);
     setTrades([]);
+    setBars(undefined);
+    setBarsUnavailable(false);
     setStatus("running");
 
     try {
@@ -256,6 +360,8 @@ export function BacktestPanel({
       }
 
       setRunId(rid);
+      runStrategyIdRef.current = strategyId;
+      runStrategyTimeframeRef.current = strategyTimeframe;
 
       if (run.status === "completed" && run.metrics != null) {
         handleRunComplete(run, rid);
@@ -323,10 +429,28 @@ export function BacktestPanel({
 
       {/* Content area */}
       <div className="max-h-[600px] overflow-y-auto">
-        {/* Equity Chart */}
-        {status === "success" && equityCurve.length > 0 && (
+        {/* Strategy chart: candlesticks + equity + markers */}
+        {status === "success" && toStrategyChartEquity(equityCurve).length > 0 && (
           <div className="border-b border-gray-800">
-            <EquityChart equityCurve={equityCurve} trades={trades} />
+            {barsUnavailable && (
+              <p className="px-4 py-1.5 text-xs text-amber-500">
+                Price bars unavailable; showing equity only.
+              </p>
+            )}
+            <StrategyChart
+              bars={bars}
+              equity={toStrategyChartEquity(equityCurve)}
+              trades={trades.map((t) => ({
+                side:
+                  t.side.toLowerCase() === "buy" || t.side.toLowerCase() === "long"
+                    ? ("long" as const)
+                    : ("short" as const),
+                entryTime: t.entryTime,
+                exitTime: t.exitTime,
+                entryPrice: t.entryPrice,
+                exitPrice: t.exitPrice,
+              }))}
+            />
           </div>
         )}
 

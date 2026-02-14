@@ -142,6 +142,7 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
           </div>
           <BacktestPanel
             strategyId={strategy.id}
+            strategyTimeframe={strategy.timeframe}
             disableRun={isCanvasSaving || hasPendingApply}
           />
         </div>

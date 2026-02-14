@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  PaperEquityChart,
-  type PaperEquityChartHandle,
+  TwoPaneChart,
+  type TwoPaneChartHandle,
   type ChartMarker,
-} from "./PaperEquityChart";
+} from "./TwoPaneChart";
 
 const POLL_SESSION_MS = 1000;
 const POLL_TRADES_MS = 3000;
@@ -118,7 +118,7 @@ export function PaperTradingPanel({
   const tradePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Chart streaming refs
-  const chartRef = useRef<PaperEquityChartHandle>(null);
+  const chartRef = useRef<TwoPaneChartHandle>(null);
   const lastEquityTimeRef = useRef(0);
   const seenTradeIdsRef = useRef(new Set<string>());
   const allMarkersRef = useRef<ChartMarker[]>([]);
@@ -135,12 +135,13 @@ export function PaperTradingPanel({
 
   // ── Chart streaming helpers ────────────────────────────────
 
-  const appendEquityFromSnapshot = useCallback((snap: SessionSnapshot) => {
+  const appendFromSnapshot = useCallback((snap: SessionSnapshot) => {
     const chart = chartRef.current;
     if (!chart) return;
     const time = toUTCSec(snap.updatedAt);
     if (time > lastEquityTimeRef.current) {
       chart.appendEquity({ time, value: snap.equity });
+      chart.appendPrice({ time, value: snap.lastPrice });
       lastEquityTimeRef.current = time;
     }
   }, []);
@@ -214,7 +215,7 @@ export function PaperTradingPanel({
 
         // Stream equity to chart
         if (data.status === "running") {
-          appendEquityFromSnapshot(data);
+          appendFromSnapshot(data);
         }
 
         if (data.status !== "running") {
@@ -224,7 +225,7 @@ export function PaperTradingPanel({
         // Network errors are transient, keep polling
       }
     },
-    [stopPolling, appendEquityFromSnapshot],
+    [stopPolling, appendFromSnapshot],
   );
 
   const pollTrades = useCallback(
@@ -279,7 +280,7 @@ export function PaperTradingPanel({
       setLoading(false);
 
       // Seed chart with initial equity point
-      appendEquityFromSnapshot(snap);
+      appendFromSnapshot(snap);
 
       if (snap.status === "running") {
         startPolling(snap.id);
@@ -419,10 +420,16 @@ export function PaperTradingPanel({
 
       {/* Content */}
       <div className="max-h-[600px] overflow-y-auto">
-        {/* Equity chart — always mounted when session exists, streaming via ref */}
+        {/* Two-pane chart: price (top) + equity (bottom), streaming via ref */}
         {showChart && (
           <div className="border-b border-gray-800">
-            <PaperEquityChart ref={chartRef} height={260} />
+            <TwoPaneChart
+              ref={chartRef}
+              mode="paper"
+              streaming
+              heightTop={200}
+              heightBottom={160}
+            />
           </div>
         )}
 

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { StrategyChart } from "./StrategyChart";
-import type { BarItem, EquityPoint as StrategyEquityPoint } from "./StrategyChart";
+import { TwoPaneChart } from "./TwoPaneChart";
+import type { BarItem } from "./TwoPaneChart";
 
 const POLL_INTERVAL_MS = 1500;
 
@@ -137,10 +137,10 @@ function getInitialCapital(run: BacktestRun): number {
   return 10_000;
 }
 
-/** Convert equity curve (ISO time + equity) to StrategyChart format (UTC seconds + value). */
-function toStrategyChartEquity(
+/** Convert equity curve (ISO time + equity) to chart format (UTC seconds + value). */
+function toChartEquity(
   curve: EquityPoint[]
-): StrategyEquityPoint[] {
+): { time: number; value: number }[] {
   return curve
     .filter((p) => p.time != null && p.time !== "")
     .map((p) => ({
@@ -429,17 +429,18 @@ export function BacktestPanel({
 
       {/* Content area */}
       <div className="max-h-[600px] overflow-y-auto">
-        {/* Strategy chart: candlesticks + equity + markers */}
-        {status === "success" && toStrategyChartEquity(equityCurve).length > 0 && (
+        {/* Two-pane chart: price (top) + equity (bottom) */}
+        {status === "success" && toChartEquity(equityCurve).length > 0 && (
           <div className="border-b border-gray-800">
             {barsUnavailable && (
               <p className="px-4 py-1.5 text-xs text-amber-500">
                 Price bars unavailable; showing equity only.
               </p>
             )}
-            <StrategyChart
+            <TwoPaneChart
+              mode="backtest"
               bars={bars}
-              equity={toStrategyChartEquity(equityCurve)}
+              equity={toChartEquity(equityCurve)}
               trades={trades.map((t) => ({
                 side:
                   t.side.toLowerCase() === "buy" || t.side.toLowerCase() === "long"

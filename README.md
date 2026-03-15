@@ -1,47 +1,73 @@
 # QuantBlocks
 
-Strategy building + backtesting + paper execution workspace for Hyperliquid-style perpetual trading.
+Strategy building + backtesting + paper execution workspace for BTC-PERP perpetual trading. Vision: **TradingView + Hyperliquid + AI Strategy Builder**.
 
-## Local Setup
+## Product Vision
+
+- **Visual Strategy Editor**: React Flow graph editor for drag-and-drop strategy design.
+- **AI Strategy Draft**: Natural-language prompt → strategy graph (currently stub; planned LLM integration).
+- **Backtesting**: Historical run against synthetic or real market data.
+- **Paper Trading**: Live simulation with simulated bars (MVP in progress).
+- **Future**: Real exchange integration (Hyperliquid), real historical data.
+
+## Current Milestone Status
+
+| Milestone | Status | Notes |
+|-----------|--------|-------|
+| M1 Strategy Canvas | ✅ Done | React Flow graph editor, node types (price, RSI, compare, open/close position, etc.) |
+| M2 AI Strategy Draft | ✅ Done | Stub translator; always returns RSI strategy regardless of prompt |
+| M3 Backtest | ✅ Done | Uses 60 synthetic candles, `SAMPLE_CANDLES`, runs synchronously |
+| M3.5 Chart Upgrade | ✅ Done | TwoPaneChart: candlestick + equity, markers, crosshair sync |
+| M4 Paper Trading | 🚧 In Progress | In-memory session, DB-persisted trades; synthetic bar simulation per poll |
+
+## Stack
+
+| Layer | Tech |
+|-------|------|
+| Frontend | Next.js 15 (App Router), React 19, TypeScript (strict), Tailwind CSS |
+| Graph Editor | @xyflow/react (React Flow) |
+| Charts | Lightweight Charts v5.1.0 |
+| Validation | Zod |
+| Database | PostgreSQL + Prisma |
+| Engine | Custom strategy runtime (see `lib/strategy/engine`, `lib/strategy/compiler`) |
+
+## Local Development
 
 ```bash
-# 1. Copy environment variables
-cp .env.example .env
+# Install
+npm install
 
-# 2. Start Postgres
-docker compose up -d
-
-# 3. Install dependencies
-npm i
-
-# 4. Run database migrations
+# Database (requires running PostgreSQL)
+cp .env.example .env   # Set DATABASE_URL
 npx prisma migrate dev
-
-# 5. Seed database with example strategy
 npx prisma db seed
 
-# 6. Start dev server
+# Run
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
-## Scripts
+## Major Routes
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start Next.js dev server |
-| `npm run build` | Production build |
-| `npm run test` | Run unit tests (Vitest) |
-| `npm run test:watch` | Run tests in watch mode |
-| `npm run lint` | ESLint |
-| `npm run format` | Prettier |
+| Route | Purpose |
+|-------|---------|
+| `/` | Home, link to strategies |
+| `/strategies` | List all strategies |
+| `/strategies/[id]` | Strategy workspace: canvas, AI panel, backtest + paper tabs |
 
-## Architecture
+## Known Limitations
 
-See [docs/SPEC.md](docs/SPEC.md) for the full MVP specification.
+- **Bars are synthetic**: `/api/strategies/:id/bars` returns random-walk OHLC, not real market data.
+- **Backtest uses fixed sample**: 60 candles from `lib/data/candles.ts`; not configurable time range.
+- **Paper trading**: Simulated bars from random walk; no real feed. Session state persisted in DB, but no background worker — execution happens on each GET poll.
+- **AI strategy**: Stub only; returns same RSI strategy for any prompt.
+- **Two strategy engines**: Backtest uses `lib/strategy/compiler`; paper uses `lib/strategy/engine`. Logic is duplicated; divergence risk.
 
-- **Data layer**: Prisma + PostgreSQL
-- **API**: Next.js App Router route handlers
-- **Core**: Graph validator, compiler, backtest engine in `src/lib/`
-- **UI**: Minimal placeholder pages (React Flow canvas TBD)
+## Roadmap Summary
+
+1. **M4 completion**: Robust paper session lifecycle, session persistence across panel switches.
+2. **Real bars**: Hyperliquid or other exchange historical/streaming data.
+3. **Unify engines**: Single shared engine for backtest + paper.
+4. **LLM integration**: Replace AI stub with real translation.
+5. **Live exchange**: Hyperliquid integration for paper/live execution.

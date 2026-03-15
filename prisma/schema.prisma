@@ -67,6 +67,7 @@ model PaperSession {
   positionQty       Float        @default(0)
   positionEntryPrice Float?
   positionOpenedAt  DateTime?    // when current position was opened (for trade entryTime on close)
+  engineState       Json?        // serialized EngineState for shared engine
   startedAt         DateTime?
   updatedAt         DateTime     @updatedAt
   createdAt         DateTime     @default(now())

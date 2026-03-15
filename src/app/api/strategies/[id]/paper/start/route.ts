@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { toSnapshot } from "@/lib/paper/engine";
 import type { SessionRow } from "@/lib/paper/engine";
+import { createInitialState } from "@/lib/strategy/engine";
+import type { Prisma } from "@prisma/client";
 
 const INITIAL_EQUITY = 10_000;
 const INITIAL_PRICE = 100;
@@ -27,6 +29,8 @@ export async function POST(
     return NextResponse.json(toSnapshot(existing as unknown as SessionRow));
   }
 
+  const engineState = createInitialState(INITIAL_EQUITY);
+
   const session = await prisma.paperSession.create({
     data: {
       strategyId: id,
@@ -40,6 +44,7 @@ export async function POST(
       positionSide: null,
       positionQty: 0,
       positionEntryPrice: null,
+      engineState: JSON.parse(JSON.stringify(engineState)) as Prisma.InputJsonValue,
       startedAt: new Date(),
     },
   });

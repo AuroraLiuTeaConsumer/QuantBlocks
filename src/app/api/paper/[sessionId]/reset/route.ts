@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { toSnapshot } from "@/lib/paper/engine";
 import type { SessionRow } from "@/lib/paper/engine";
@@ -34,6 +35,7 @@ export async function POST(
         positionSide: null,
         positionQty: 0,
         positionEntryPrice: null,
+        engineState: Prisma.DbNull,
         startedAt: null,
       },
     }),

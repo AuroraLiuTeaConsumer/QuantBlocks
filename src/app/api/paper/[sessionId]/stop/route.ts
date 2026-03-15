@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { toSnapshot } from "@/lib/paper/engine";
 import type { SessionRow } from "@/lib/paper/engine";
+import { forceClose } from "@/lib/strategy/engine";
+import type { EngineState, Bar } from "@/lib/strategy/engine";
+import type { Prisma } from "@prisma/client";
 
 export async function POST(
   _req: NextRequest,
@@ -24,9 +27,52 @@ export async function POST(
     );
   }
 
+  // Force-close any open position via the engine
+  const engineState = session.engineState as unknown as EngineState | null;
+  let updateData: Record<string, unknown> = { status: "stopped" };
+
+  if (engineState?.position) {
+    const bar: Bar = {
+      timeSec: Math.floor(Date.now() / 1000),
+      open: session.lastPrice,
+      high: session.lastPrice,
+      low: session.lastPrice,
+      close: session.lastPrice,
+    };
+    const { state: closedState, event } = forceClose(engineState, bar);
+
+    updateData = {
+      status: "stopped",
+      equity: closedState.equity,
+      realizedPnl: closedState.realizedPnl,
+      unrealizedPnl: 0,
+      positionSide: null,
+      positionQty: 0,
+      positionEntryPrice: null,
+      positionOpenedAt: null,
+      engineState: JSON.parse(JSON.stringify(closedState)) as Prisma.InputJsonValue,
+    };
+
+    // Record closing trade
+    if (event && event.kind === "CLOSED") {
+      await prisma.paperTrade.create({
+        data: {
+          sessionId,
+          side: event.side,
+          qty: event.qty,
+          entryTime: new Date(event.entryTimeSec * 1000),
+          entryPrice: event.entryPrice,
+          exitTime: new Date(event.timeSec * 1000),
+          exitPrice: event.exitPrice,
+          pnl: event.pnl,
+        },
+      });
+    }
+  }
+
   const updated = await prisma.paperSession.update({
     where: { id: sessionId },
-    data: { status: "stopped" },
+    data: updateData,
   });
 
   return NextResponse.json(toSnapshot(updated as unknown as SessionRow));

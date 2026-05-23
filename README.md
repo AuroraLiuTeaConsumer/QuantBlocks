@@ -62,7 +62,7 @@ Open [http://localhost:3000](http://localhost:3000).
 - **Backtest uses fixed sample**: 60 candles from `lib/data/candles.ts`; not configurable time range.
 - **Paper trading**: Simulated bars from random walk; no real feed. Session state persisted in DB, but no background worker — execution happens on each GET poll.
 - **AI strategy**: Stub only; returns same RSI strategy for any prompt.
-- **Two strategy engines**: Backtest uses `lib/strategy/compiler`; paper uses `lib/strategy/engine`. Logic is duplicated; divergence risk.
+- **Backtest fees/slippage**: Applied in `lib/backtest/backtest.ts` on top of shared engine fills at bar close (same as paper).
 
 ## Roadmap Summary
 

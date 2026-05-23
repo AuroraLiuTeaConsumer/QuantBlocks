@@ -1,4 +1,4 @@
-import type { Candle } from "../strategy/compiler";
+import type { Candle } from "../backtest/backtest";
 
 /**
  * 60 synthetic 1h BTC-PERP candles for testing.

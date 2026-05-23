@@ -25,9 +25,8 @@ QuantBlocks is a full-stack Next.js application. Frontend and API routes run in 
 │  ┌──────────────┐ ┌──────────────┐ ┌──────────────────────────┐ │
 │  │ lib/strategy │ │ lib/backtest │ │ lib/paper/engine         │ │
 │  │ validator    │ │ backtest.ts  │ │ (toSnapshot, types)      │ │
-│  │ compiler.ts  │ │ (SAMPLE_CANDL│ │                          │ │
-│  │ graphTypes   │ │ ES)          │ │ lib/strategy/engine/     │ │
-│  │              │ │              │ │ (compile, step, runtime) │ │
+│  │ graphTypes   │ │ (SAMPLE_CANDL│ │ lib/strategy/engine/     │ │
+│  │              │ │ ES)          │ │ (compile, step, runtime) │ │
 │  └──────────────┘ └──────────────┘ └──────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
           │
@@ -76,7 +75,7 @@ QuantBlocks is a full-stack Next.js application. Frontend and API routes run in 
 ## Strategy Graph Flow
 
 1. **Save**: StrategyCanvas → PUT `/api/strategies/:id` → `validateGraph` → Prisma update.
-2. **Backtest**: BacktestPanel → POST `/api/strategies/:id/backtests` → `runBacktest` (compiler) → SAMPLE_CANDLES → trades persisted.
+2. **Backtest**: BacktestPanel → POST `/api/strategies/:id/backtests` → `runBacktest` (shared engine) → SAMPLE_CANDLES → trades persisted.
 3. **Paper**: PaperTradingPanel → POST `/api/strategies/:id/paper/start` → PaperSession created; GET `/api/paper/:sessionId` advances engine with simulated bars per poll.
 
 ## Polling-Based Execution Model
@@ -90,14 +89,13 @@ QuantBlocks is a full-stack Next.js application. Frontend and API routes run in 
 |---------|----------|
 | UI | `components/strategy/*` |
 | Route handlers | `app/api/*` |
-| Engine logic | `lib/strategy/engine/*`, `lib/strategy/compiler.ts`, `lib/backtest/backtest.ts` |
+| Engine logic | `lib/strategy/engine/*`, `lib/backtest/backtest.ts` (fees/metrics wrapper) |
 | Validation | `lib/strategy/validator.ts`, `lib/strategy/graphTypes.ts` (Zod) |
 | DB access | `lib/prisma.ts`, Prisma models |
 
 ## Current Weak Points / Technical Debt
 
-1. **Dual engine**: Backtest uses `lib/strategy/compiler`; paper uses `lib/strategy/engine`. Same graph logic in two places; divergence risk.
-2. **Synthetic data everywhere**: Bars, backtest candles, paper bars — all fake.
+1. **Synthetic data everywhere**: Bars, backtest candles, paper bars — all fake.
 3. **No background worker**: Paper advances only when a client polls. Multiple tabs could cause duplicate advancement; optimistic lock mitigates but is imperfect.
 4. **Session persistence**: Switching tabs (backtest ↔ paper) does not preserve paper session state in UI; session lives in DB but panel state resets.
 5. **AI stub**: No real LLM; always same RSI strategy.

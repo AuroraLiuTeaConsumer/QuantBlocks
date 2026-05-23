@@ -94,13 +94,15 @@ body {
 /* ─── Node form-control utilities (used inside nodeTypes/*) ─── */
 @layer components {
   .node-input {
-    @apply rounded-md border border-line-strong bg-surface-alt px-2 py-0.5 text-xs text-ink-1 outline-none transition-colors;
+    @apply rounded-md border bg-surface-alt px-2 py-0.5 text-xs text-ink-1 outline-none transition-colors;
+    border-color: var(--border-2);
   }
   .node-input:focus {
     border-color: var(--accent);
   }
   .node-select {
-    @apply rounded-md border border-line-strong bg-surface-alt px-2 py-0.5 text-xs text-ink-1 outline-none;
+    @apply rounded-md border bg-surface-alt px-2 py-0.5 text-xs text-ink-1 outline-none;
+    border-color: var(--border-2);
   }
   .node-chip {
     @apply cursor-pointer rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors;

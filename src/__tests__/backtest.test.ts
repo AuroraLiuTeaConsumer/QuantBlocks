@@ -44,14 +44,13 @@ describe("backtest engine", () => {
     }
   });
 
-  it("respects the fill-at-next-bar-open model", () => {
+  it("fills at signal bar close (same model as paper engine)", () => {
     const result = runBacktest(exampleGraph, SAMPLE_CANDLES, DEFAULT_CONFIG);
     if (result.trades.length === 0) return;
 
     const firstTrade = result.trades[0];
-    // The entry price should equal some bar's open price (not close)
-    const openPrices = SAMPLE_CANDLES.map((c) => c.open);
-    expect(openPrices).toContain(firstTrade.entryPrice);
+    const closePrices = SAMPLE_CANDLES.map((c) => c.close);
+    expect(closePrices).toContain(firstTrade.entryPrice);
   });
 
   it("handles SL/TP with worst-case when both hit", () => {

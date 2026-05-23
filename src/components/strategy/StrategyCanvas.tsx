@@ -7,16 +7,19 @@ import {
   addEdge,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type Connection,
   type Node,
   type Edge,
   Controls,
   MiniMap,
   Background,
+  BackgroundVariant,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { strategyNodeTypes } from "./nodeTypes";
 import type { StrategyNode, StrategyEdge } from "@/lib/strategy/graphTypes";
+import { PALETTE_DND_TYPE } from "./NodePalette";
 
 const DEBOUNCE_MS = 1500;
 
@@ -48,6 +51,13 @@ function persistGraph(
   });
 }
 
+function nextNodeId(existing: Node[]): string {
+  let i = 1;
+  const taken = new Set(existing.map((n) => n.id));
+  while (taken.has(`n${i}`)) i++;
+  return `n${i}`;
+}
+
 function FlowCanvas({
   strategyId,
   initialNodes,
@@ -63,23 +73,24 @@ function FlowCanvas({
   onSaveSuccess?: () => void;
   onSaveError?: (message: string) => void;
   onSavingChange?: (saving: boolean) => void;
-  /** When this value changes, one save is triggered (e.g. after Apply draft). */
   saveRequestKey?: number;
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes as Node[]);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges as Edge[]);
   const [saving, setSaving] = useState(false);
+  const { screenToFlowPosition } = useReactFlow();
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     onSavingChange?.(saving);
   }, [saving, onSavingChange]);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
+
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasUserChangedRef = useRef(false);
   const lastSaveRequestKeyRef = useRef(saveRequestKey ?? -1);
 
   const save = useCallback(async () => {
     setSaving(true);
-    setSaveStatus("idle");
     try {
       const res = await persistGraph(strategyId, nodes, edges);
       if (!res.ok) {
@@ -87,14 +98,11 @@ function FlowCanvas({
         const message = body.details?.length
           ? body.details.map((e: { message?: string }) => e.message).join("; ")
           : body.error ?? "Save failed";
-        setSaveStatus("error");
         onSaveError?.(message);
         return;
       }
-      setSaveStatus("saved");
       onSaveSuccess?.();
     } catch (err) {
-      setSaveStatus("error");
       onSaveError?.(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSaving(false);
@@ -111,38 +119,37 @@ function FlowCanvas({
     return () => {
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     };
-  }, [nodes, edges, save]); 
+  }, [nodes, edges, save]);
 
   useEffect(() => {
     setNodes(initialNodes as Node[]);
     setEdges(initialEdges as Edge[]);
     hasUserChangedRef.current = false;
-    setSaveStatus("idle");
   }, [initialNodes, initialEdges, setNodes, setEdges]);
 
-  // One-time save when parent requests it (e.g. after Apply draft). Persist the incoming graph (initialNodes/initialEdges), not current state, so we don't rely on sync effect order.
+  // One-time save when parent requests it (e.g. after Apply draft)
   useEffect(() => {
     const key = saveRequestKey ?? -1;
     if (key !== lastSaveRequestKeyRef.current && key >= 0) {
       lastSaveRequestKeyRef.current = key;
       (async () => {
         setSaving(true);
-        setSaveStatus("idle");
         try {
-          const res = await persistGraph(strategyId, initialNodes as Node[], initialEdges as Edge[]);
+          const res = await persistGraph(
+            strategyId,
+            initialNodes as Node[],
+            initialEdges as Edge[]
+          );
           if (!res.ok) {
             const body = await res.json().catch(() => ({}));
             const message = body.details?.length
               ? body.details.map((e: { message?: string }) => e.message).join("; ")
               : body.error ?? "Save failed";
-            setSaveStatus("error");
             onSaveError?.(message);
             return;
           }
-          setSaveStatus("saved");
           onSaveSuccess?.();
         } catch (err) {
-          setSaveStatus("error");
           onSaveError?.(err instanceof Error ? err.message : "Save failed");
         } finally {
           setSaving(false);
@@ -174,62 +181,64 @@ function FlowCanvas({
     [setEdges]
   );
 
-  const handleSaveClick = () => {
-    if (autosaveTimerRef.current) {
-      clearTimeout(autosaveTimerRef.current);
-      autosaveTimerRef.current = null;
-    }
-    save();
-  };
+  // ── Drop support for NodePalette drags ─────────────────────
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  }, []);
+
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      const raw = e.dataTransfer.getData(PALETTE_DND_TYPE);
+      if (!raw) return;
+      let payload: { type: string; label?: string; data?: Record<string, unknown> };
+      try {
+        payload = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const newNode: Node = {
+        id: nextNodeId(nodes),
+        type: payload.type,
+        position,
+        data: payload.data ?? {},
+      };
+      hasUserChangedRef.current = true;
+      setNodes((nds) => [...nds, newNode]);
+    },
+    [screenToFlowPosition, nodes, setNodes]
+  );
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-end gap-2 py-2 border-b border-gray-800">
-        {saveStatus === "saved" && (
-          <span className="text-xs text-green-500">Saved</span>
-        )}
-        {saveStatus === "error" && (
-          <span className="text-xs text-red-500">Error saving</span>
-        )}
-        <button
-          type="button"
-          onClick={handleSaveClick}
-          disabled={saving}
-          className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-sm font-medium text-white"
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
-      </div>
-      <div className="flex-1 min-h-0">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChangeWithDirty}
-          onEdgesChange={onEdgesChangeWithDirty}
-          onConnect={onConnect}
-          nodeTypes={strategyNodeTypes}
-          fitView
-          deleteKeyCode={["Backspace", "Delete"]}
-          className="bg-gray-950"
-        >
-          <Controls className="!bg-gray-900 !border-gray-700" />
-          <MiniMap className="!bg-gray-900 !border-gray-700" />
-          <Background gap={12} size={1} color="rgba(75,85,99,0.3)" />
-        </ReactFlow>
-      </div>
+    <div ref={wrapperRef} className="h-full w-full" onDrop={onDrop} onDragOver={onDragOver}>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={onNodesChangeWithDirty}
+        onEdgesChange={onEdgesChangeWithDirty}
+        onConnect={onConnect}
+        nodeTypes={strategyNodeTypes}
+        fitView
+        deleteKeyCode={["Backspace", "Delete"]}
+        proOptions={{ hideAttribution: true }}
+        className="bg-[#f8f9fd]"
+      >
+        <Controls />
+        <MiniMap
+          maskColor="rgba(241, 245, 250, 0.6)"
+          nodeColor={() => "var(--accent-bg)"}
+          nodeStrokeColor={() => "var(--accent)"}
+          nodeStrokeWidth={2}
+        />
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1.1} color="rgba(0,0,0,0.09)" />
+      </ReactFlow>
     </div>
   );
 }
 
-export function StrategyCanvas({
-  strategyId,
-  initialNodes,
-  initialEdges,
-  onSaveSuccess,
-  onSaveError,
-  onSavingChange,
-  saveRequestKey,
-}: {
+export function StrategyCanvas(props: {
   strategyId: string;
   initialNodes: StrategyNode[];
   initialEdges: StrategyEdge[];
@@ -240,15 +249,7 @@ export function StrategyCanvas({
 }) {
   return (
     <ReactFlowProvider>
-      <FlowCanvas
-        strategyId={strategyId}
-        initialNodes={initialNodes}
-        initialEdges={initialEdges}
-        onSaveSuccess={onSaveSuccess}
-        onSaveError={onSaveError}
-        onSavingChange={onSavingChange}
-        saveRequestKey={saveRequestKey}
-      />
+      <FlowCanvas {...props} />
     </ReactFlowProvider>
   );
 }

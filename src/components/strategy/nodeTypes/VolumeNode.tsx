@@ -6,7 +6,7 @@ import { BaseNode } from "./BaseNode";
 export function VolumeNode(props: NodeProps) {
   return (
     <BaseNode {...props} title="Volume" outputHandle>
-      <div className="mt-1 text-sm text-gray-500">series</div>
+      <span className="node-label">series</span>
     </BaseNode>
   );
 }

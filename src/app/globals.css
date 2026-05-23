@@ -2,6 +2,122 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Design tokens ─────────────────────────────────────────── */
+:root {
+  --bg: #f0f3fa;
+  --surface: #ffffff;
+  --surface-2: #f5f7fb;
+  --border: #e1e4ec;
+  --border-2: #cdd0da;
+  --text-1: #131722;
+  --text-2: #6b7280;
+  --text-3: #b2b5be;
+  --accent: #2962ff;
+  --accent-bg: #eef2ff;
+  --accent-border: rgba(41, 98, 255, 0.25);
+  --green: #089981;
+  --green-bg: #e8f5f2;
+  --red: #f23645;
+  --red-bg: #fef0f1;
+  --purple: #7c3aed;
+  --purple-bg: #f3eeff;
+  --amber: #d97706;
+  --amber-bg: #fffbeb;
+  --warn: var(--amber);
+  --warn-bg: #fffbeb;
+
+  /* DM Sans / DM Mono — set via Google Fonts link in layout.tsx */
+  --font-dm-sans: "DM Sans", system-ui, -apple-system, sans-serif;
+  --font-dm-mono: "DM Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
 body {
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: var(--font-dm-sans);
+  background: var(--bg);
+  color: var(--text-1);
+  -webkit-font-smoothing: antialiased;
+  font-size: 13px;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: 3px;
+}
+
+/* ─── React Flow light theme overrides ──────────────────────── */
+.react-flow__controls {
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 6px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06) !important;
+}
+.react-flow__controls-button {
+  background: var(--surface) !important;
+  border-bottom: 1px solid var(--border) !important;
+  color: var(--text-2) !important;
+  fill: var(--text-2) !important;
+}
+.react-flow__controls-button:hover {
+  background: var(--surface-2) !important;
+}
+.react-flow__minimap {
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+}
+.react-flow__edge-path {
+  stroke: var(--border-2);
+  stroke-width: 1.5;
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:focus .react-flow__edge-path {
+  stroke: var(--accent);
+}
+.react-flow__handle {
+  width: 10px !important;
+  height: 10px !important;
+  border: 2px solid var(--border-2) !important;
+  background: var(--surface) !important;
+}
+.react-flow__handle.connectable:hover {
+  border-color: var(--accent) !important;
+}
+
+/* ─── Node form-control utilities (used inside nodeTypes/*) ─── */
+@layer components {
+  .node-input {
+    @apply rounded-md border border-line-strong bg-surface-alt px-2 py-0.5 text-xs text-ink-1 outline-none transition-colors;
+  }
+  .node-input:focus {
+    border-color: var(--accent);
+  }
+  .node-select {
+    @apply rounded-md border border-line-strong bg-surface-alt px-2 py-0.5 text-xs text-ink-1 outline-none;
+  }
+  .node-chip {
+    @apply cursor-pointer rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors;
+    border-color: var(--border-2);
+    background: var(--surface-2);
+    color: var(--text-2);
+  }
+  .node-chip:hover {
+    background: var(--surface);
+  }
+  .node-chip-active {
+    @apply rounded-md px-2 py-0.5 text-[11px] font-semibold text-white;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+  }
+  .node-label {
+    @apply text-[10px] font-medium uppercase tracking-wide;
+    color: var(--text-3);
+  }
 }

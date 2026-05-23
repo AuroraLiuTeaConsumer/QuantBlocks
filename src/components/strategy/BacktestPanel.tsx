@@ -6,9 +6,7 @@ import type { BarItem } from "./TwoPaneChart";
 
 const POLL_INTERVAL_MS = 1500;
 
-/** Equity curve from backend or built from trades: time as ISO string, equity as number */
 type EquityPoint = { time: string; equity: number };
-
 type RunStatus = "idle" | "running" | "success" | "error";
 
 type BacktestRun = {
@@ -39,10 +37,7 @@ function formatTime(iso: string | null | undefined): string {
   if (iso == null || iso === "") return "—";
   try {
     const d = new Date(iso);
-    return d.toLocaleString(undefined, {
-      dateStyle: "short",
-      timeStyle: "short",
-    });
+    return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
   } catch {
     return String(iso);
   }
@@ -58,23 +53,34 @@ function formatNum(value: unknown, digits = 2): string {
   return value.toLocaleString(undefined, { maximumFractionDigits: digits });
 }
 
-type MetricCardProps = {
+function MetricCard({
+  label,
+  value,
+  positive,
+}: {
   label: string;
   value: string;
   positive?: boolean | null;
-};
-
-function MetricCard({ label, value, positive }: MetricCardProps) {
-  let valueColor = "text-gray-200";
-  if (positive === true) valueColor = "text-green-400";
-  if (positive === false) valueColor = "text-red-400";
+}) {
+  const tone =
+    positive === true
+      ? { bg: "var(--green-bg)", color: "var(--green)" }
+      : positive === false
+      ? { bg: "var(--red-bg)", color: "var(--red)" }
+      : { bg: "var(--surface-2)", color: "var(--text-1)" };
 
   return (
-    <div className="flex flex-col items-center rounded-lg bg-gray-800/60 px-4 py-3">
-      <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
+    <div
+      className="flex flex-col items-center rounded-lg px-3.5 py-2"
+      style={{ background: tone.bg, minWidth: 76 }}
+    >
+      <span className="text-[9px] font-bold uppercase tracking-[0.08em] text-ink-3">
         {label}
       </span>
-      <span className={`mt-1 text-lg font-semibold tabular-nums ${valueColor}`}>
+      <span
+        className="mt-1 font-mono text-[15px] font-bold tabular-nums"
+        style={{ color: tone.color }}
+      >
         {value}
       </span>
     </div>
@@ -91,32 +97,23 @@ function buildEquityCurveFromTrades(
       (a, b) =>
         new Date(a.exitTime!).getTime() - new Date(b.exitTime!).getTime()
     );
-
   if (closed.length === 0) return [];
-
   const earliestEntry = closed.reduce((best, t) =>
     new Date(t.entryTime).getTime() < new Date(best.entryTime).getTime()
       ? t
       : best
   );
-
   const curve: EquityPoint[] = [
     { time: earliestEntry.entryTime, equity: initialCapital },
   ];
-
   let equity = initialCapital;
   for (const t of closed) {
     equity += t.pnl;
     curve.push({ time: t.exitTime!, equity });
   }
-
   return curve;
 }
 
-/**
- * Resolve the initial capital used for the backtest when building equity from trades.
- * Prefer run.log.initialCapital (from backend), then derive from metrics, else fallback.
- */
 function getInitialCapital(run: BacktestRun): number {
   const fromLog = run.log?.initialCapital;
   if (typeof fromLog === "number" && Number.isFinite(fromLog) && fromLog > 0) {
@@ -137,7 +134,6 @@ function getInitialCapital(run: BacktestRun): number {
   return 10_000;
 }
 
-/** Convert equity curve (ISO time + equity) to chart format (UTC seconds + value). */
 function toChartEquity(
   curve: EquityPoint[]
 ): { time: number; value: number }[] {
@@ -160,7 +156,7 @@ export function BacktestPanel({
   disableRun?: boolean;
 }) {
   const [status, setStatus] = useState<RunStatus>("idle");
-  const [runId, setRunId] = useState<string | null>(null);
+  const [, setRunId] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<Record<string, unknown> | null>(null);
   const [equityCurve, setEquityCurve] = useState<EquityPoint[]>([]);
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -192,55 +188,50 @@ export function BacktestPanel({
     };
   }, [stopPolling]);
 
-  const fetchTrades = useCallback(
-    async (rid: string) => {
-      const res = await fetch(`/api/backtests/${rid}/trades`);
-      if (!res.ok) return;
-      const data = await res.json();
-      if (Array.isArray(data) && mountedRef.current) setTrades(data as Trade[]);
-    },
-    [mountedRef]
-  );
+  const fetchTrades = useCallback(async (rid: string) => {
+    const res = await fetch(`/api/backtests/${rid}/trades`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data) && mountedRef.current) setTrades(data as Trade[]);
+  }, []);
 
-  const fetchBars = useCallback(
-    async (sid: string, timeframe: string) => {
-      const res = await fetch(
-        `/api/strategies/${sid}/bars?timeframe=${encodeURIComponent(timeframe)}&limit=500`
-      );
-      if (!mountedRef.current) return;
-      // Only apply result if this request still matches the current run (avoids race when switching strategies or running multiple backtests).
-      const stillCurrent =
-        runStrategyIdRef.current === sid &&
-        runStrategyTimeframeRef.current === timeframe;
-      if (!stillCurrent) return;
-      if (!res.ok) {
-        setBars(undefined);
-        setBarsUnavailable(true);
-        return;
-      }
-      const data = await res.json();
-      if (!mountedRef.current) return;
-      if (runStrategyIdRef.current !== sid || runStrategyTimeframeRef.current !== timeframe) return;
-      if (Array.isArray(data)) {
-        setBars(data as BarItem[]);
-        setBarsUnavailable(false);
-      }
-    },
-    []
-  );
+  const fetchBars = useCallback(async (sid: string, timeframe: string) => {
+    const res = await fetch(
+      `/api/strategies/${sid}/bars?timeframe=${encodeURIComponent(timeframe)}&limit=500`
+    );
+    if (!mountedRef.current) return;
+    const stillCurrent =
+      runStrategyIdRef.current === sid &&
+      runStrategyTimeframeRef.current === timeframe;
+    if (!stillCurrent) return;
+    if (!res.ok) {
+      setBars(undefined);
+      setBarsUnavailable(true);
+      return;
+    }
+    const data = await res.json();
+    if (!mountedRef.current) return;
+    if (
+      runStrategyIdRef.current !== sid ||
+      runStrategyTimeframeRef.current !== timeframe
+    )
+      return;
+    if (Array.isArray(data)) {
+      setBars(data as BarItem[]);
+      setBarsUnavailable(false);
+    }
+  }, []);
 
   const handleRunComplete = useCallback(
     (run: BacktestRun, rid: string) => {
       setMetrics(run.metrics ?? null);
       setStatus("success");
 
-      // Extract equity curve from log if available, else build from trades
       const logCurve = run.log?.equityCurve;
       if (Array.isArray(logCurve) && logCurve.length > 0) {
         setEquityCurve(logCurve);
       }
 
-      // Use refs so polling completion (possibly with stale closure) fetches bars for the strategy we ran for
       const sid = runStrategyIdRef.current ?? strategyIdRef.current;
       const tf = runStrategyTimeframeRef.current ?? strategyTimeframeRef.current;
       fetchBars(sid, tf);
@@ -248,7 +239,6 @@ export function BacktestPanel({
       const initialCapital = getInitialCapital(run);
       fetchTrades(rid).then(() => {
         if (!mountedRef.current) return;
-        // If no server-side equity curve, build from trades after they load
         if (!Array.isArray(logCurve) || logCurve.length === 0) {
           setTrades((currentTrades) => {
             if (!mountedRef.current) return currentTrades;
@@ -275,7 +265,6 @@ export function BacktestPanel({
       if (isDone) {
         stopPolling();
         if (!mountedRef.current) return;
-        // Run completed for a different strategy than currently viewed; discard result
         if (
           strategyIdRef.current !== runStrategyIdRef.current ||
           strategyTimeframeRef.current !== runStrategyTimeframeRef.current
@@ -291,9 +280,7 @@ export function BacktestPanel({
         stopPolling();
         if (mountedRef.current) {
           const errMsg =
-            typeof run.log === "object" &&
-            run.log &&
-            "error" in run.log
+            typeof run.log === "object" && run.log && "error" in run.log
               ? String(run.log.error)
               : "Backtest failed";
           setError(errMsg);
@@ -351,8 +338,8 @@ export function BacktestPanel({
 
       const run = data as BacktestRun;
       const rid =
-        (data as Record<string, unknown>).runId as string | undefined ??
-        (data as Record<string, unknown>).id as string | undefined;
+        ((data as Record<string, unknown>).runId as string | undefined) ??
+        ((data as Record<string, unknown>).id as string | undefined);
       if (!rid) {
         setError("No run id in response");
         setStatus("error");
@@ -367,7 +354,6 @@ export function BacktestPanel({
         handleRunComplete(run, rid);
         return;
       }
-
       startPolling(rid);
     } catch (err) {
       if (mountedRef.current) {
@@ -377,7 +363,6 @@ export function BacktestPanel({
     }
   };
 
-  // Metric helpers
   const totalReturn = metrics?.totalReturnPct as number | undefined;
   const sharpe = metrics?.sharpe as number | undefined;
   const maxDD = metrics?.maxDrawdownPct as number | undefined;
@@ -388,21 +373,28 @@ export function BacktestPanel({
   return (
     <div className="flex shrink-0 flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between gap-4 border-b border-gray-800 px-4 py-2.5">
-        <div className="flex items-center gap-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
-            Backtest
-          </h2>
+      <div className="flex items-center justify-between border-b border-line px-4 py-2">
+        <div className="flex items-center gap-2.5">
           <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-              status === "idle"
-                ? "bg-gray-800 text-gray-500"
-                : status === "running"
-                  ? "bg-blue-900/40 text-blue-400"
+            className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
+            style={{
+              background:
+                status === "running"
+                  ? "var(--accent-bg)"
                   : status === "success"
-                    ? "bg-green-900/40 text-green-400"
-                    : "bg-red-900/40 text-red-400"
-            }`}
+                  ? "var(--green-bg)"
+                  : status === "error"
+                  ? "var(--red-bg)"
+                  : "var(--surface-2)",
+              color:
+                status === "running"
+                  ? "var(--accent)"
+                  : status === "success"
+                  ? "var(--green)"
+                  : status === "error"
+                  ? "var(--red)"
+                  : "var(--text-2)",
+            }}
           >
             {status === "idle" && "Idle"}
             {status === "running" && "Running…"}
@@ -414,202 +406,185 @@ export function BacktestPanel({
           type="button"
           onClick={handleRunBacktest}
           disabled={status === "running" || disableRun}
-          className="rounded-lg bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-md bg-profit px-3 py-1.5 text-xs font-semibold text-white shadow-[0_1px_4px_rgba(8,153,129,0.25)] transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {status === "running" ? "Running…" : "Run Backtest"}
+          {status === "running" ? (
+            <>
+              <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+              Running…
+            </>
+          ) : (
+            <>
+              <svg width="10" height="10" viewBox="0 0 11 11" fill="currentColor">
+                <polygon points="2,1 10,5.5 2,10" />
+              </svg>
+              Run Backtest
+            </>
+          )}
         </button>
       </div>
 
-      {/* Error banner */}
+      {/* Error */}
       {error && (
-        <div className="border-b border-red-800 bg-red-900/30 px-4 py-2 text-sm text-red-300">
+        <div className="border-b border-loss/30 bg-loss-bg px-4 py-2 text-xs text-loss">
           {error}
         </div>
       )}
 
-      {/* Content area */}
-      <div className="max-h-[600px] overflow-y-auto">
-        {/* Two-pane chart: price (top) + equity (bottom) */}
-        {status === "success" && toChartEquity(equityCurve).length > 0 && (
-          <div className="border-b border-gray-800">
-            {barsUnavailable && (
-              <p className="px-4 py-1.5 text-xs text-amber-500">
-                Price bars unavailable; showing equity only.
-              </p>
-            )}
-            <TwoPaneChart
-              mode="backtest"
-              bars={bars}
-              equity={toChartEquity(equityCurve)}
-              trades={trades.map((t) => ({
-                side:
-                  t.side.toLowerCase() === "buy" || t.side.toLowerCase() === "long"
-                    ? ("long" as const)
-                    : ("short" as const),
-                entryTime: t.entryTime,
-                exitTime: t.exitTime,
-                entryPrice: t.entryPrice,
-                exitPrice: t.exitPrice,
-              }))}
-            />
-          </div>
-        )}
+      {/* Chart */}
+      {status === "success" && toChartEquity(equityCurve).length > 0 && (
+        <div className="border-b border-line">
+          {barsUnavailable && (
+            <p className="px-4 py-1 text-[11px] text-warn">
+              Price bars unavailable; showing equity only.
+            </p>
+          )}
+          <TwoPaneChart
+            mode="backtest"
+            bars={bars}
+            equity={toChartEquity(equityCurve)}
+            trades={trades.map((t) => ({
+              side:
+                t.side.toLowerCase() === "buy" || t.side.toLowerCase() === "long"
+                  ? ("long" as const)
+                  : ("short" as const),
+              entryTime: t.entryTime,
+              exitTime: t.exitTime,
+              entryPrice: t.entryPrice,
+              exitPrice: t.exitPrice,
+            }))}
+          />
+        </div>
+      )}
 
-        {/* Metrics bar */}
-        {status === "success" && metrics != null && (
-          <div className="grid grid-cols-3 gap-2 border-b border-gray-800 px-4 py-3 sm:grid-cols-6">
-            <MetricCard
-              label="Return"
-              value={formatPct(totalReturn)}
-              positive={
-                typeof totalReturn === "number" ? totalReturn >= 0 : null
-              }
-            />
-            <MetricCard
-              label="Net PnL"
-              value={formatNum(netPnl)}
-              positive={typeof netPnl === "number" ? netPnl >= 0 : null}
-            />
-            <MetricCard
-              label="Sharpe"
-              value={formatNum(sharpe)}
-              positive={typeof sharpe === "number" ? sharpe >= 0 : null}
-            />
-            <MetricCard
-              label="Max DD"
-              value={formatPct(maxDD)}
-              positive={false}
-            />
-            <MetricCard
-              label="Win Rate"
-              value={formatPct(winRate)}
-              positive={
-                typeof winRate === "number" ? winRate >= 50 : null
-              }
-            />
-            <MetricCard
-              label="Trades"
-              value={formatNum(numTrades, 0)}
-            />
-          </div>
-        )}
+      {/* Metrics */}
+      {status === "success" && metrics != null && (
+        <div className="grid grid-cols-3 gap-2 border-b border-line px-4 py-3 sm:grid-cols-6">
+          <MetricCard
+            label="Return"
+            value={formatPct(totalReturn)}
+            positive={typeof totalReturn === "number" ? totalReturn >= 0 : null}
+          />
+          <MetricCard
+            label="Net PnL"
+            value={formatNum(netPnl)}
+            positive={typeof netPnl === "number" ? netPnl >= 0 : null}
+          />
+          <MetricCard
+            label="Sharpe"
+            value={formatNum(sharpe)}
+            positive={typeof sharpe === "number" ? sharpe >= 0 : null}
+          />
+          <MetricCard label="Max DD" value={formatPct(maxDD)} positive={false} />
+          <MetricCard
+            label="Win Rate"
+            value={formatPct(winRate)}
+            positive={typeof winRate === "number" ? winRate >= 50 : null}
+          />
+          <MetricCard label="Trades" value={formatNum(numTrades, 0)} />
+        </div>
+      )}
 
-        {/* Trades table */}
-        {status === "success" && trades.length > 0 && (
-          <div className="px-4 py-3">
-            <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
-              Trades ({trades.length})
-            </h3>
-            <div className="overflow-x-auto rounded-lg border border-gray-800">
-              <table className="w-full min-w-[600px] text-left text-sm">
-                <thead>
-                  <tr className="border-b border-gray-700 bg-gray-800/40 text-xs uppercase text-gray-500">
-                    <th className="px-3 py-2">Side</th>
-                    <th className="px-3 py-2">Entry Time</th>
-                    <th className="px-3 py-2 text-right">Entry Price</th>
-                    <th className="px-3 py-2">Exit Time</th>
-                    <th className="px-3 py-2 text-right">Exit Price</th>
-                    <th className="px-3 py-2 text-right">Qty</th>
-                    <th className="px-3 py-2 text-right">PnL</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {trades.map((t, i) => {
-                    const pnlPositive =
-                      typeof t.pnl === "number" && t.pnl >= 0;
-                    const isLong =
-                      t.side.toLowerCase() === "long" ||
-                      t.side.toLowerCase() === "buy";
-                    return (
-                      <tr
-                        key={t.id ?? i}
-                        className="border-b border-gray-800/60 transition-colors hover:bg-gray-800/30"
-                      >
-                        <td className="px-3 py-1.5">
-                          <span
-                            className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${
-                              isLong
-                                ? "bg-green-900/30 text-green-400"
-                                : "bg-red-900/30 text-red-400"
-                            }`}
-                          >
-                            {t.side}
-                          </span>
-                        </td>
-                        <td className="px-3 py-1.5 text-gray-400">
-                          {formatTime(t.entryTime)}
-                        </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-gray-300">
-                          {formatNum(t.entryPrice)}
-                        </td>
-                        <td className="px-3 py-1.5 text-gray-400">
-                          {formatTime(t.exitTime)}
-                        </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-gray-300">
-                          {t.exitPrice != null ? formatNum(t.exitPrice) : "—"}
-                        </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-gray-300">
-                          {formatNum(t.qty, 4)}
-                        </td>
-                        <td
-                          className={`px-3 py-1.5 text-right tabular-nums font-medium ${
-                            pnlPositive ? "text-green-400" : "text-red-400"
-                          }`}
+      {/* Trades */}
+      {status === "success" && trades.length > 0 && (
+        <div className="px-4 py-3">
+          <h3 className="mb-2 text-[10px] font-bold uppercase tracking-[0.07em] text-ink-3">
+            Trades ({trades.length})
+          </h3>
+          <div className="overflow-x-auto rounded-lg border border-line">
+            <table className="w-full min-w-[600px] text-left text-xs">
+              <thead>
+                <tr className="border-b border-line bg-surface-alt text-[10px] uppercase text-ink-3">
+                  <th className="px-3 py-2 font-semibold">Side</th>
+                  <th className="px-3 py-2 font-semibold">Entry Time</th>
+                  <th className="px-3 py-2 text-right font-semibold">Entry $</th>
+                  <th className="px-3 py-2 font-semibold">Exit Time</th>
+                  <th className="px-3 py-2 text-right font-semibold">Exit $</th>
+                  <th className="px-3 py-2 text-right font-semibold">Qty</th>
+                  <th className="px-3 py-2 text-right font-semibold">PnL</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trades.map((t, i) => {
+                  const pnlPositive = typeof t.pnl === "number" && t.pnl >= 0;
+                  const isLong =
+                    t.side.toLowerCase() === "long" ||
+                    t.side.toLowerCase() === "buy";
+                  return (
+                    <tr
+                      key={t.id ?? i}
+                      className="border-b border-line/60 transition-colors hover:bg-surface-alt"
+                    >
+                      <td className="px-3 py-1.5">
+                        <span
+                          className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                          style={{
+                            background: isLong ? "var(--green-bg)" : "var(--red-bg)",
+                            color: isLong ? "var(--green)" : "var(--red)",
+                          }}
                         >
-                          {typeof t.pnl === "number"
-                            ? `${t.pnl >= 0 ? "+" : ""}${formatNum(t.pnl)}`
-                            : t.pnl}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                          {t.side}
+                        </span>
+                      </td>
+                      <td className="px-3 py-1.5 font-mono text-[11px] text-ink-2">
+                        {formatTime(t.entryTime)}
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono tabular-nums text-ink-1">
+                        {formatNum(t.entryPrice)}
+                      </td>
+                      <td className="px-3 py-1.5 font-mono text-[11px] text-ink-2">
+                        {formatTime(t.exitTime)}
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono tabular-nums text-ink-1">
+                        {t.exitPrice != null ? formatNum(t.exitPrice) : "—"}
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono tabular-nums text-ink-2">
+                        {formatNum(t.qty, 4)}
+                      </td>
+                      <td
+                        className="px-3 py-1.5 text-right font-mono font-semibold tabular-nums"
+                        style={{ color: pnlPositive ? "var(--green)" : "var(--red)" }}
+                      >
+                        {typeof t.pnl === "number"
+                          ? `${t.pnl >= 0 ? "+" : ""}${formatNum(t.pnl)}`
+                          : t.pnl}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Empty states */}
-        {status === "success" && trades.length === 0 && metrics != null && (
-          <p className="px-4 py-6 text-center text-sm text-gray-500">
-            No trades in this run.
-          </p>
-        )}
+      {/* Empty / running states */}
+      {status === "success" && trades.length === 0 && metrics != null && (
+        <p className="px-4 py-6 text-center text-xs text-ink-3">
+          No trades in this run.
+        </p>
+      )}
 
-        {status === "idle" && !error && (
-          <p className="px-4 py-6 text-center text-sm text-gray-500">
-            Run a backtest against the saved strategy graph.
-          </p>
-        )}
-
-        {status === "running" && (
-          <div className="flex items-center justify-center gap-2 px-4 py-10">
-            <svg
-              className="h-5 w-5 animate-spin text-blue-400"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              />
-            </svg>
-            <span className="text-sm text-gray-400">
-              Running backtest…
-            </span>
+      {status === "idle" && !error && (
+        <div className="flex flex-col items-center justify-center gap-1.5 px-4 py-8 text-center">
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-profit-bg">
+            <span className="text-base text-profit">▷</span>
           </div>
-        )}
-      </div>
+          <div className="text-[13px] font-semibold text-ink-2">
+            Run a backtest to see results
+          </div>
+          <div className="text-[11px] text-ink-3">
+            Simulates your strategy against historical bars
+          </div>
+        </div>
+      )}
+
+      {status === "running" && (
+        <div className="flex items-center justify-center gap-2 px-4 py-10 text-xs text-ink-2">
+          <span className="inline-block h-4 w-4 animate-spin rounded-full border-[2.5px] border-line-strong border-t-profit" />
+          Simulating strategy on historical bars…
+        </div>
+      )}
     </div>
   );
 }

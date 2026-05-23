@@ -17,15 +17,13 @@ export function ConstantNode(props: NodeProps) {
 
   return (
     <BaseNode {...props} title="Constant" outputHandle>
-      <div className="mt-1 flex items-center gap-2">
-        <input
-          type="number"
-          step="any"
-          value={value}
-          onChange={(e) => setValue(Number(e.target.value))}
-          className="nodrag w-20 rounded border border-gray-600 bg-gray-800 px-2 py-0.5 text-sm text-gray-200"
-        />
-      </div>
+      <input
+        type="number"
+        step="any"
+        value={value}
+        onChange={(e) => setValue(Number(e.target.value))}
+        className="node-input w-full"
+      />
     </BaseNode>
   );
 }

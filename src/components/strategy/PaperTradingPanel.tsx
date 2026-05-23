@@ -10,8 +10,6 @@ import {
 const POLL_SESSION_MS = 1000;
 const POLL_TRADES_MS = 3000;
 
-// ── Types ────────────────────────────────────────────────────
-
 type Position = {
   side: "long" | "short" | null;
   qty: number;
@@ -44,8 +42,6 @@ type PaperTrade = {
   pnl: number;
 };
 
-// ── Helpers ──────────────────────────────────────────────────
-
 function toUTCSec(date: string | Date): number {
   return Math.floor(new Date(date).getTime() / 1000);
 }
@@ -69,12 +65,10 @@ function formatTime(iso: string | null | undefined): string {
 }
 
 function pnlColor(v: number): string {
-  if (v > 0) return "text-green-400";
-  if (v < 0) return "text-red-400";
-  return "text-gray-400";
+  if (v > 0) return "var(--green)";
+  if (v < 0) return "var(--red)";
+  return "var(--text-2)";
 }
-
-// ── Stat Card ────────────────────────────────────────────────
 
 function StatCard({
   label,
@@ -86,20 +80,19 @@ function StatCard({
   color?: string;
 }) {
   return (
-    <div className="flex flex-col items-center rounded-lg bg-gray-800/60 px-3 py-2">
-      <span className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
+    <div className="flex flex-col items-center rounded-lg bg-surface-alt px-3 py-2">
+      <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-ink-3">
         {label}
       </span>
       <span
-        className={`mt-0.5 text-sm font-semibold tabular-nums ${color ?? "text-gray-200"}`}
+        className="mt-0.5 font-mono text-[13px] font-semibold tabular-nums"
+        style={{ color: color ?? "var(--text-1)" }}
       >
         {value}
       </span>
     </div>
   );
 }
-
-// ── Main Component ───────────────────────────────────────────
 
 export function PaperTradingPanel({
   strategyId,
@@ -117,13 +110,11 @@ export function PaperTradingPanel({
   const sessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tradePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Chart streaming refs
   const chartRef = useRef<TwoPaneChartHandle>(null);
   const lastEquityTimeRef = useRef(0);
   const seenTradeIdsRef = useRef(new Set<string>());
   const allMarkersRef = useRef<ChartMarker[]>([]);
 
-  // Cleanup on unmount
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -132,8 +123,6 @@ export function PaperTradingPanel({
       if (tradePollRef.current) clearInterval(tradePollRef.current);
     };
   }, []);
-
-  // ── Chart streaming helpers ────────────────────────────────
 
   const appendFromSnapshot = useCallback((snap: SessionSnapshot) => {
     const chart = chartRef.current;
@@ -149,25 +138,19 @@ export function PaperTradingPanel({
   const syncMarkersFromTrades = useCallback((tradeList: PaperTrade[]) => {
     const chart = chartRef.current;
     if (!chart) return;
-
     let changed = false;
     for (const t of tradeList) {
       if (seenTradeIdsRef.current.has(t.id)) continue;
       seenTradeIdsRef.current.add(t.id);
       changed = true;
-
       const isLong = t.side === "long";
-
-      // Entry marker
       allMarkersRef.current.push({
         time: toUTCSec(t.entryTime),
         position: isLong ? "belowBar" : "aboveBar",
         shape: isLong ? "arrowUp" : "arrowDown",
-        color: isLong ? "#22c55e" : "#ef4444",
+        color: isLong ? "#089981" : "#f23645",
         text: isLong ? "Long" : "Short",
       });
-
-      // Exit marker (if closed)
       if (t.exitTime) {
         allMarkersRef.current.push({
           time: toUTCSec(t.exitTime),
@@ -178,10 +161,7 @@ export function PaperTradingPanel({
         });
       }
     }
-
-    if (changed) {
-      chart.setMarkers(allMarkersRef.current);
-    }
+    if (changed) chart.setMarkers(allMarkersRef.current);
   }, []);
 
   const resetChart = useCallback(() => {
@@ -190,8 +170,6 @@ export function PaperTradingPanel({
     seenTradeIdsRef.current.clear();
     allMarkersRef.current = [];
   }, []);
-
-  // ── Polling ──────────────────────────────────────────────
 
   const stopPolling = useCallback(() => {
     if (sessionPollRef.current) {
@@ -212,20 +190,13 @@ export function PaperTradingPanel({
         const data = (await res.json()) as SessionSnapshot;
         if (!mountedRef.current) return;
         setSession(data);
-
-        // Stream equity to chart
-        if (data.status === "running") {
-          appendFromSnapshot(data);
-        }
-
-        if (data.status !== "running") {
-          stopPolling();
-        }
+        if (data.status === "running") appendFromSnapshot(data);
+        if (data.status !== "running") stopPolling();
       } catch {
-        // Network errors are transient, keep polling
+        // transient
       }
     },
-    [stopPolling, appendFromSnapshot],
+    [stopPolling, appendFromSnapshot]
   );
 
   const pollTrades = useCallback(
@@ -243,7 +214,7 @@ export function PaperTradingPanel({
         // transient
       }
     },
-    [syncMarkersFromTrades],
+    [syncMarkersFromTrades]
   );
 
   const startPolling = useCallback(
@@ -254,10 +225,8 @@ export function PaperTradingPanel({
       sessionPollRef.current = setInterval(() => pollSession(sid), POLL_SESSION_MS);
       tradePollRef.current = setInterval(() => pollTrades(sid), POLL_TRADES_MS);
     },
-    [stopPolling, pollSession, pollTrades],
+    [stopPolling, pollSession, pollTrades]
   );
-
-  // ── Actions ──────────────────────────────────────────────
 
   const handleStart = async () => {
     setError(null);
@@ -278,13 +247,8 @@ export function PaperTradingPanel({
       setSession(snap);
       setTrades([]);
       setLoading(false);
-
-      // Seed chart with initial equity point
       appendFromSnapshot(snap);
-
-      if (snap.status === "running") {
-        startPolling(snap.id);
-      }
+      if (snap.status === "running") startPolling(snap.id);
     } catch (err) {
       if (mountedRef.current) {
         setError(err instanceof Error ? err.message : "Network error");
@@ -306,7 +270,6 @@ export function PaperTradingPanel({
       }
       setSession(data as SessionSnapshot);
       stopPolling();
-      // Final trade fetch to capture any last trades
       pollTrades(session.id);
     } catch (err) {
       if (mountedRef.current) {
@@ -337,46 +300,43 @@ export function PaperTradingPanel({
     }
   };
 
-  // ── Status helpers ───────────────────────────────────────
-
   const status = session?.status ?? "idle";
   const isRunning = status === "running";
   const canStart = !isRunning && !disableRun && !loading;
   const canStop = isRunning;
   const canReset = session != null && !isRunning;
 
-  const statusBadge = (() => {
+  const statusStyle = (() => {
     switch (status) {
       case "running":
-        return "bg-blue-900/40 text-blue-400";
+        return { bg: "var(--accent-bg)", color: "var(--accent)" };
       case "stopped":
-        return "bg-yellow-900/40 text-yellow-400";
+        return { bg: "var(--warn-bg)", color: "var(--amber)" };
       case "error":
-        return "bg-red-900/40 text-red-400";
+        return { bg: "var(--red-bg)", color: "var(--red)" };
       default:
-        return "bg-gray-800 text-gray-500";
+        return { bg: "var(--surface-2)", color: "var(--text-2)" };
     }
   })();
 
   const showChart = session != null && status !== "idle";
 
-  // ── Render ───────────────────────────────────────────────
-
   return (
     <div className="flex shrink-0 flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between gap-4 border-b border-gray-800 px-4 py-2.5">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between gap-4 border-b border-line px-4 py-2">
+        <div className="flex items-center gap-2.5">
           <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge}`}
+            className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize"
+            style={{ background: statusStyle.bg, color: statusStyle.color }}
           >
-            {status === "idle" && "Idle"}
-            {status === "running" && "Running"}
-            {status === "stopped" && "Stopped"}
-            {status === "error" && "Error"}
+            {status}
           </span>
           {isRunning && (
-            <span className="h-2 w-2 animate-pulse rounded-full bg-blue-400" />
+            <span
+              className="h-2 w-2 animate-soft-pulse rounded-full"
+              style={{ background: "var(--accent)" }}
+            />
           )}
         </div>
         <div className="flex gap-2">
@@ -384,7 +344,7 @@ export function PaperTradingPanel({
             <button
               type="button"
               onClick={handleReset}
-              className="rounded-lg border border-gray-600 px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-800"
+              className="rounded-md border border-line-strong bg-surface px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-surface-alt"
             >
               Reset
             </button>
@@ -393,8 +353,11 @@ export function PaperTradingPanel({
             <button
               type="button"
               onClick={handleStop}
-              className="rounded-lg border border-red-700 bg-red-900/30 px-3 py-1.5 text-sm text-red-300 hover:bg-red-900/50"
+              className="inline-flex items-center gap-1.5 rounded-md border border-loss/40 bg-loss-bg px-3 py-1.5 text-xs font-semibold text-loss hover:brightness-95"
             >
+              <svg width="10" height="10" viewBox="0 0 11 11" fill="currentColor">
+                <rect x="1.5" y="1.5" width="8" height="8" rx="1" />
+              </svg>
               Stop
             </button>
           )}
@@ -403,161 +366,170 @@ export function PaperTradingPanel({
               type="button"
               onClick={handleStart}
               disabled={!canStart}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white shadow-[0_1px_4px_rgba(41,98,255,0.25)] transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
             >
+              <svg width="10" height="10" viewBox="0 0 11 11" fill="currentColor">
+                <polygon points="2,1 10,5.5 2,10" />
+              </svg>
               {loading ? "Starting…" : "Start Paper Trading"}
             </button>
           )}
         </div>
       </div>
 
-      {/* Error */}
       {error && (
-        <div className="border-b border-red-800 bg-red-900/30 px-4 py-2 text-sm text-red-300">
+        <div className="border-b border-loss/30 bg-loss-bg px-4 py-2 text-xs text-loss">
           {error}
         </div>
       )}
 
-      {/* Content */}
-      <div className="max-h-[600px] overflow-y-auto">
-        {/* Two-pane chart: price (top) + equity (bottom), streaming via ref */}
-        {showChart && (
-          <div className="border-b border-gray-800">
-            <TwoPaneChart
-              ref={chartRef}
-              mode="paper"
-              streaming
-              heightTop={200}
-              heightBottom={160}
-            />
-          </div>
-        )}
+      {/* Chart */}
+      {showChart && (
+        <div className="border-b border-line">
+          <TwoPaneChart
+            ref={chartRef}
+            mode="paper"
+            streaming
+            heightTop={200}
+            heightBottom={160}
+          />
+        </div>
+      )}
 
-        {/* Live Stats */}
-        {session && status !== "idle" && (
-          <div className="grid grid-cols-3 gap-2 border-b border-gray-800 px-4 py-3 sm:grid-cols-6">
-            <StatCard label="Price" value={formatNum(session.lastPrice, 4)} />
-            <StatCard label="Equity" value={formatNum(session.equity)} />
-            <StatCard
-              label="Realized"
-              value={`${session.realizedPnl >= 0 ? "+" : ""}${formatNum(session.realizedPnl)}`}
-              color={pnlColor(session.realizedPnl)}
-            />
-            <StatCard
-              label="Unrealized"
-              value={`${session.unrealizedPnl >= 0 ? "+" : ""}${formatNum(session.unrealizedPnl)}`}
-              color={pnlColor(session.unrealizedPnl)}
-            />
-            <StatCard
-              label="Position"
-              value={
-                session.position.side
-                  ? `${session.position.side.toUpperCase()} ${formatNum(session.position.qty, 4)}`
-                  : "Flat"
-              }
-              color={
-                session.position.side === "long"
-                  ? "text-green-400"
-                  : session.position.side === "short"
-                    ? "text-red-400"
-                    : undefined
-              }
-            />
-            <StatCard
-              label="Entry"
-              value={
-                session.position.entryPrice != null
-                  ? formatNum(session.position.entryPrice, 4)
-                  : "—"
-              }
-            />
-          </div>
-        )}
+      {/* Stats */}
+      {session && status !== "idle" && (
+        <div className="grid grid-cols-3 gap-2 border-b border-line px-4 py-3 sm:grid-cols-6">
+          <StatCard label="Price" value={formatNum(session.lastPrice, 4)} />
+          <StatCard label="Equity" value={formatNum(session.equity)} />
+          <StatCard
+            label="Realized"
+            value={`${session.realizedPnl >= 0 ? "+" : ""}${formatNum(session.realizedPnl)}`}
+            color={pnlColor(session.realizedPnl)}
+          />
+          <StatCard
+            label="Unrealized"
+            value={`${session.unrealizedPnl >= 0 ? "+" : ""}${formatNum(session.unrealizedPnl)}`}
+            color={pnlColor(session.unrealizedPnl)}
+          />
+          <StatCard
+            label="Position"
+            value={
+              session.position.side
+                ? `${session.position.side.toUpperCase()} ${formatNum(session.position.qty, 4)}`
+                : "Flat"
+            }
+            color={
+              session.position.side === "long"
+                ? "var(--green)"
+                : session.position.side === "short"
+                ? "var(--red)"
+                : undefined
+            }
+          />
+          <StatCard
+            label="Entry"
+            value={
+              session.position.entryPrice != null
+                ? formatNum(session.position.entryPrice, 4)
+                : "—"
+            }
+          />
+        </div>
+      )}
 
-        {/* Trade Log */}
-        {trades.length > 0 && (
-          <div className="px-4 py-3">
-            <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
-              Trades ({trades.length})
-            </h3>
-            <div className="overflow-x-auto rounded-lg border border-gray-800">
-              <table className="w-full min-w-[550px] text-left text-sm">
-                <thead>
-                  <tr className="border-b border-gray-700 bg-gray-800/40 text-xs uppercase text-gray-500">
-                    <th className="px-3 py-2">Side</th>
-                    <th className="px-3 py-2">Entry</th>
-                    <th className="px-3 py-2 text-right">Entry $</th>
-                    <th className="px-3 py-2">Exit</th>
-                    <th className="px-3 py-2 text-right">Exit $</th>
-                    <th className="px-3 py-2 text-right">Qty</th>
-                    <th className="px-3 py-2 text-right">PnL</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {trades.map((t) => {
-                    const isLong = t.side === "long";
-                    return (
-                      <tr
-                        key={t.id}
-                        className="border-b border-gray-800/60 transition-colors hover:bg-gray-800/30"
-                      >
-                        <td className="px-3 py-1.5">
-                          <span
-                            className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${
-                              isLong
-                                ? "bg-green-900/30 text-green-400"
-                                : "bg-red-900/30 text-red-400"
-                            }`}
-                          >
-                            {t.side}
-                          </span>
-                        </td>
-                        <td className="px-3 py-1.5 text-gray-400">
-                          {formatTime(t.entryTime)}
-                        </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-gray-300">
-                          {formatNum(t.entryPrice, 4)}
-                        </td>
-                        <td className="px-3 py-1.5 text-gray-400">
-                          {formatTime(t.exitTime)}
-                        </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-gray-300">
-                          {t.exitPrice != null ? formatNum(t.exitPrice, 4) : "—"}
-                        </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-gray-300">
-                          {formatNum(t.qty, 4)}
-                        </td>
-                        <td
-                          className={`px-3 py-1.5 text-right tabular-nums font-medium ${pnlColor(t.pnl)}`}
+      {/* Trades */}
+      {trades.length > 0 && (
+        <div className="px-4 py-3">
+          <h3 className="mb-2 text-[10px] font-bold uppercase tracking-[0.07em] text-ink-3">
+            Trades ({trades.length})
+          </h3>
+          <div className="overflow-x-auto rounded-lg border border-line">
+            <table className="w-full min-w-[550px] text-left text-xs">
+              <thead>
+                <tr className="border-b border-line bg-surface-alt text-[10px] uppercase text-ink-3">
+                  <th className="px-3 py-2 font-semibold">Side</th>
+                  <th className="px-3 py-2 font-semibold">Entry</th>
+                  <th className="px-3 py-2 text-right font-semibold">Entry $</th>
+                  <th className="px-3 py-2 font-semibold">Exit</th>
+                  <th className="px-3 py-2 text-right font-semibold">Exit $</th>
+                  <th className="px-3 py-2 text-right font-semibold">Qty</th>
+                  <th className="px-3 py-2 text-right font-semibold">PnL</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trades.map((t) => {
+                  const isLong = t.side === "long";
+                  return (
+                    <tr
+                      key={t.id}
+                      className="border-b border-line/60 transition-colors hover:bg-surface-alt"
+                    >
+                      <td className="px-3 py-1.5">
+                        <span
+                          className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                          style={{
+                            background: isLong ? "var(--green-bg)" : "var(--red-bg)",
+                            color: isLong ? "var(--green)" : "var(--red)",
+                          }}
                         >
-                          {t.pnl >= 0 ? "+" : ""}
-                          {formatNum(t.pnl)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                          {t.side}
+                        </span>
+                      </td>
+                      <td className="px-3 py-1.5 font-mono text-[11px] text-ink-2">
+                        {formatTime(t.entryTime)}
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono tabular-nums text-ink-1">
+                        {formatNum(t.entryPrice, 4)}
+                      </td>
+                      <td className="px-3 py-1.5 font-mono text-[11px] text-ink-2">
+                        {formatTime(t.exitTime)}
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono tabular-nums text-ink-1">
+                        {t.exitPrice != null ? formatNum(t.exitPrice, 4) : "—"}
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono tabular-nums text-ink-2">
+                        {formatNum(t.qty, 4)}
+                      </td>
+                      <td
+                        className="px-3 py-1.5 text-right font-mono font-semibold tabular-nums"
+                        style={{ color: pnlColor(t.pnl) }}
+                      >
+                        {t.pnl >= 0 ? "+" : ""}
+                        {formatNum(t.pnl)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Empty states */}
-        {status === "idle" && !session && (
-          <p className="px-4 py-6 text-center text-sm text-gray-500">
-            Start paper trading to simulate live execution of this strategy.
-          </p>
-        )}
-
-        {isRunning && trades.length === 0 && (
-          <div className="flex items-center justify-center gap-2 px-4 py-6">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-blue-400" />
-            <span className="text-sm text-gray-400">
-              Waiting for trades…
-            </span>
+      {/* Empty states */}
+      {status === "idle" && !session && (
+        <div className="flex flex-col items-center justify-center gap-1.5 px-4 py-8 text-center">
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-accent-bg">
+            <span className="text-base text-accent">◉</span>
           </div>
-        )}
-      </div>
+          <div className="text-[13px] font-semibold text-ink-2">
+            Paper trading not active
+          </div>
+          <div className="text-[11px] text-ink-3">
+            Simulates live execution against a synthetic feed
+          </div>
+        </div>
+      )}
+
+      {isRunning && trades.length === 0 && (
+        <div className="flex items-center justify-center gap-2 px-4 py-6 text-xs text-ink-2">
+          <span
+            className="h-2 w-2 animate-soft-pulse rounded-full"
+            style={{ background: "var(--accent)" }}
+          />
+          Waiting for trades…
+        </div>
+      )}
     </div>
   );
 }

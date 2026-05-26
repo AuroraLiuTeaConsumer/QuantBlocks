@@ -21,6 +21,7 @@ Vision: **TradingView + Hyperliquid + AI Strategy Builder**.
 | M3.5 Chart Upgrade | ✅ Done | TwoPaneChart: candlestick + equity, markers, crosshair sync |
 | M4 Paper Trading | 🚧 In Progress | Synthetic bars; real feed in Phase 3 |
 | **M5 Real Market Data** | ✅ Done | TimescaleDB hypertable, CCXT ingestion, BacktestDataLoader |
+| **M6 Data Quality & Coverage** | ✅ Done | Funding rates, open interest, quality checker, coverage dashboard, multi-exchange |
 
 ## Stack
 
@@ -31,8 +32,8 @@ Vision: **TradingView + Hyperliquid + AI Strategy Builder**.
 | Charts | Lightweight Charts v5.1.0 |
 | Validation | Zod |
 | App database | PostgreSQL + Prisma |
-| Market data store | TimescaleDB (same PostgreSQL instance, raw SQL hypertable) |
-| Market data fetch | CCXT (Binance perpetuals; Bybit/OKX next) |
+| Market data store | TimescaleDB (same PostgreSQL instance, raw SQL hypertable — candles, funding_rates, open_interest) |
+| Market data fetch | CCXT (Binance, Bybit, OKX perpetuals) |
 | Data access | `pg` Pool (TimescaleDB); Prisma (app tables) |
 | Engine | Custom strategy runtime (`lib/strategy/engine`) |
 
@@ -56,7 +57,11 @@ npm run setup:timescale
 # 5. Ingest real historical candles (Binance BTC/USDT:USDT 1h, 90 days)
 npm run ingest
 
-# 6. Run
+# 6. (Optional) Ingest funding rates and open interest
+npm run ingest -- --dataType funding_rate
+npm run ingest -- --dataType open_interest --timeframe 1h
+
+# 7. Run
 npm run dev
 ```
 
@@ -71,6 +76,7 @@ Steps 4–5 are optional: the app falls back to a synthetic 60-bar sample if no 
 | `/` | Home |
 | `/strategies` | List strategies |
 | `/strategies/[id]` | Strategy workspace: canvas, AI panel, backtest + paper tabs |
+| `/market-data` | Data coverage dashboard: candles, funding rates, open interest, ingestion jobs |
 
 ## Known Limitations
 
@@ -84,7 +90,7 @@ Steps 4–5 are optional: the app falls back to a synthetic 60-bar sample if no 
 | Phase | Goal | Status |
 |-------|------|--------|
 | 1 | Real historical candles in backtest (CCXT → TimescaleDB) | ✅ Done |
-| 2 | Funding rates, OI, gap detection, data quality checks | Planned |
+| 2 | Funding rates, open interest, quality checks, multi-exchange, coverage dashboard | ✅ Done |
 | 3 | Native Hyperliquid adapter, live WebSocket, Redis pub/sub | Planned |
 | 4 | CoinGlass derivatives data (liquidations, long/short ratios) | Planned |
 | 5 | Paper trading on live Redis stream, session replay | Planned |

@@ -1,11 +1,13 @@
 /**
  * POST /api/market-data/ingest
  *
- * Trigger a historical candle backfill from the browser or another service.
+ * Trigger a historical data backfill from the browser or another service.
  * Useful during development and for ad-hoc gap-filling without SSH access.
  *
  * For production bulk backfills prefer the CLI job:
  *   npm run ingest -- --days 365
+ *   npm run ingest -- --dataType funding_rate
+ *   npm run ingest -- --dataType open_interest
  *
  * Request body (JSON):
  *   {
@@ -14,17 +16,17 @@
  *     symbol?:     string;   // CCXT unified     (used when instrument absent)
  *     timeframe?:  string;   // default '1h'
  *     days?:       number;   // default 90
+ *     dataType?:   string;   // 'candle' (default) | 'funding_rate' | 'open_interest'
  *   }
  *
  * Returns: { jobId, rowsInserted, gapsFilled, durationMs }
- *
- * NOTE: This runs synchronously in the API route (fine for MVP / small ranges).
- * For large backfills (> 6 months) switch to a background job queue.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { HistoricalDataIngestionService } from "@/lib/market-data/ingestion/historical-service";
+import { FundingRateIngestionService } from "@/lib/market-data/ingestion/funding-rate-service";
+import { OpenInterestIngestionService } from "@/lib/market-data/ingestion/open-interest-service";
 import { resolveInstrument, isTimeframe } from "@/lib/market-data/types";
 import type { Exchange, Timeframe } from "@/lib/market-data/types";
 
@@ -66,6 +68,15 @@ export async function POST(req: NextRequest) {
   const timeframe: Timeframe = tfRaw;
 
   const days = typeof body.days === "number" ? body.days : 90;
+  const dataType = (body.dataType as string) ?? "candle";
+
+  if (!["candle", "funding_rate", "open_interest"].includes(dataType)) {
+    return NextResponse.json(
+      { error: `Invalid dataType "${dataType}". Must be candle | funding_rate | open_interest` },
+      { status: 400 },
+    );
+  }
+
   const endTime = new Date();
   const startTime = new Date(endTime.getTime() - days * 24 * 3600 * 1_000);
 
@@ -76,7 +87,7 @@ export async function POST(req: NextRequest) {
       exchange,
       symbol,
       timeframe,
-      dataType: "candle",
+      dataType,
       startTime,
       endTime,
       status: "running",
@@ -87,8 +98,18 @@ export async function POST(req: NextRequest) {
   // ── Run ingestion ─────────────────────────────────────────────────────────
 
   try {
-    const service = new HistoricalDataIngestionService();
-    const result = await service.ingest({ exchange, symbol, timeframe, startTime, endTime });
+    let result: { rowsInserted: number; gapsFilled: number; durationMs: number };
+
+    if (dataType === "funding_rate") {
+      const service = new FundingRateIngestionService();
+      result = await service.ingest({ exchange, symbol, startTime, endTime });
+    } else if (dataType === "open_interest") {
+      const service = new OpenInterestIngestionService();
+      result = await service.ingest({ exchange, symbol, timeframe, startTime, endTime });
+    } else {
+      const service = new HistoricalDataIngestionService();
+      result = await service.ingest({ exchange, symbol, timeframe, startTime, endTime });
+    }
 
     await prisma.ingestionJob.update({
       where: { id: job.id },

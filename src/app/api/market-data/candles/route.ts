@@ -85,9 +85,13 @@ export async function GET(req: NextRequest) {
 
   const limitRaw = searchParams.get("limit");
   const limit = Math.min(
-    limitRaw ? parseInt(limitRaw, 10) : DEFAULT_LIMIT,
+    Math.max(1, limitRaw ? parseInt(limitRaw, 10) : DEFAULT_LIMIT),
     MAX_LIMIT,
   );
+
+  if (Number.isNaN(limit)) {
+    return NextResponse.json({ error: "Invalid limit parameter" }, { status: 400 });
+  }
 
   // ── Query ────────────────────────────────────────────────────────────────
 

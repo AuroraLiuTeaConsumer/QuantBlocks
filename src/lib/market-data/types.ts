@@ -53,9 +53,51 @@ export interface Candle {
   closed: boolean; // false = candle is still in progress
 }
 
+/**
+ * Perpetual futures funding rate event.
+ * Funding payments happen every 8 hours on Binance / Bybit / OKX.
+ */
+export interface FundingRate {
+  exchange: Exchange;
+  symbol: string;
+  fundingTime: Date;
+  fundingRate: number; // decimal, e.g. 0.0001 = 0.01%
+  markPrice: number | null;
+}
+
+/**
+ * Open interest snapshot at a given timestamp.
+ * Granularity matches the timeframe (e.g. '1h' = hourly snapshots).
+ */
+export interface OpenInterest {
+  exchange: Exchange;
+  symbol: string;
+  timeframe: Timeframe;
+  ts: Date;
+  openInterest: number; // base-asset quantity
+  openInterestValue: number | null; // quote currency value
+}
+
 // ─── Query Types ─────────────────────────────────────────────────────────────
 
 export interface CandleQuery {
+  exchange: Exchange;
+  symbol: string;
+  timeframe: Timeframe;
+  startTime: Date;
+  endTime: Date;
+  limit?: number;
+}
+
+export interface FundingRateQuery {
+  exchange: Exchange;
+  symbol: string;
+  startTime: Date;
+  endTime: Date;
+  limit?: number;
+}
+
+export interface OpenInterestQuery {
   exchange: Exchange;
   symbol: string;
   timeframe: Timeframe;
@@ -82,10 +124,19 @@ export interface IngestionJobSpec {
   endTime: Date;
 }
 
+export interface QualityReport {
+  totalChecked: number;
+  ohlcErrors: number;
+  negativePrices: number;
+  volumeErrors: number;
+  spikeWarnings: number;
+}
+
 export interface IngestionResult {
   rowsInserted: number;
   gapsFilled: number;
   durationMs: number;
+  quality?: QualityReport;
 }
 
 // ─── Symbol / Instrument Mapping ─────────────────────────────────────────────
@@ -98,13 +149,29 @@ export interface InstrumentMapping {
 
 /**
  * Canonical map from QuantBlocks instrument → exchange + CCXT symbol.
- * Extend this as more instruments are supported.
+ *
+ * Naming convention: <BASE>-PERP[-<EXCHANGE>]
+ *   - No suffix  → default exchange (Binance)
+ *   - -BYBIT     → Bybit
+ *   - -OKX       → OKX
  */
 export const INSTRUMENT_MAP: Record<string, InstrumentMapping> = {
+  // ── Binance (default) ────────────────────────────────────────────────────
   "BTC-PERP": { exchange: "binance", symbol: "BTC/USDT:USDT" },
   "ETH-PERP": { exchange: "binance", symbol: "ETH/USDT:USDT" },
   "SOL-PERP": { exchange: "binance", symbol: "SOL/USDT:USDT" },
   "BNB-PERP": { exchange: "binance", symbol: "BNB/USDT:USDT" },
+  "XRP-PERP": { exchange: "binance", symbol: "XRP/USDT:USDT" },
+  "DOGE-PERP": { exchange: "binance", symbol: "DOGE/USDT:USDT" },
+
+  // ── Bybit ────────────────────────────────────────────────────────────────
+  "BTC-PERP-BYBIT": { exchange: "bybit", symbol: "BTC/USDT:USDT" },
+  "ETH-PERP-BYBIT": { exchange: "bybit", symbol: "ETH/USDT:USDT" },
+  "SOL-PERP-BYBIT": { exchange: "bybit", symbol: "SOL/USDT:USDT" },
+
+  // ── OKX ──────────────────────────────────────────────────────────────────
+  "BTC-PERP-OKX": { exchange: "okx", symbol: "BTC/USDT:USDT" },
+  "ETH-PERP-OKX": { exchange: "okx", symbol: "ETH/USDT:USDT" },
 };
 
 /**

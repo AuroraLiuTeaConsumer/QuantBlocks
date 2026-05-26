@@ -15,19 +15,25 @@ cp .env.example .env       # set DATABASE_URL
 npx prisma migrate dev
 npx prisma db seed
 
-# 4. Market data schema (TimescaleDB hypertable — run once)
+# 4. Market data schema (TimescaleDB hypertables — run once)
+#    Creates: candles, funding_rates, open_interest
 npm run setup:timescale
 
 # 5. Ingest real historical candles (Binance BTC/USDT:USDT 1h, 90 days)
 npm run ingest
 
-# 6. Run
+# 6. (Optional) Ingest funding rates and open interest
+npm run ingest -- --dataType funding_rate
+npm run ingest -- --dataType open_interest --timeframe 1h
+
+# 7. Run
 npm run dev
 ```
 
-Steps 4–5 are optional. The app falls back to a synthetic 60-bar sample if no real data is available. The backtest panel will show an amber "⚠ Sample" badge in that case.
+Steps 4–6 are optional. The app falls back to a synthetic 60-bar sample if no real data is available. The backtest panel shows an amber "⚠ Sample" badge in that case.
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000).  
+Market data dashboard: [http://localhost:3000/market-data](http://localhost:3000/market-data)
 
 ## Env Vars
 
@@ -35,13 +41,12 @@ Open [http://localhost:3000](http://localhost:3000).
 |-----|----------|-------|
 | DATABASE_URL | Yes | PostgreSQL connection string — used by both Prisma and TimescaleDB raw pool |
 
-`DATABASE_URL` must point to the TimescaleDB instance (same Postgres, same port). Example:
-
+Example:
 ```
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/quantblocks"
 ```
 
-No other env vars are currently required (no API keys for CCXT; Binance public OHLCV is unauthenticated).
+No other env vars are currently required (Binance public OHLCV is unauthenticated; CCXT requires no API keys for historical data).
 
 ## Scripts
 
@@ -53,9 +58,11 @@ No other env vars are currently required (no API keys for CCXT; Binance public O
 | Lint | `npm run lint` | ESLint |
 | Format | `npm run format` | Prettier |
 | Tests | `npm run test` | Vitest, watch mode |
-| Setup TimescaleDB | `npm run setup:timescale` | Run `db/migrations/timescale/*.sql` once |
-| Ingest candles | `npm run ingest` | Backfill Binance BTC/USDT:USDT 1h, 90 days |
-| Ingest (custom) | `npm run ingest -- --symbol "ETH/USDT:USDT" --days 180` | Flags: `--exchange`, `--symbol`, `--timeframe`, `--days` |
+| Setup TimescaleDB | `npm run setup:timescale` | Run `db/migrations/timescale/*.sql` in order |
+| Ingest candles | `npm run ingest` | Binance BTC/USDT:USDT 1h, 90 days |
+| Ingest (custom) | `npm run ingest -- --exchange bybit --symbol "BTC/USDT:USDT" --timeframe 1h --days 180` | |
+| Ingest funding rates | `npm run ingest -- --dataType funding_rate --days 365` | |
+| Ingest open interest | `npm run ingest -- --dataType open_interest --timeframe 1h` | |
 
 ## Prisma
 
@@ -66,46 +73,48 @@ No other env vars are currently required (no API keys for CCXT; Binance public O
 
 ## Two Migration Tracks
 
-QuantBlocks uses two separate database migration systems:
-
 | Track | Tool | Schema | When to run |
 |-------|------|---------|-------------|
 | App tables | Prisma (`prisma/schema.prisma`) | Strategy, BacktestRun, Trade, PaperSession, PaperTrade, IngestionJob | `npx prisma migrate dev` |
-| TimescaleDB hypertable | Raw SQL (`db/migrations/timescale/*.sql`) | candles | `npm run setup:timescale` (once) |
+| TimescaleDB hypertables | Raw SQL (`db/migrations/timescale/*.sql`) | candles, funding_rates, open_interest | `npm run setup:timescale` (once) |
 
-After adding a new Prisma model, always run `npx prisma generate` to update the TypeScript client before using `prisma.<model>` in code.
+`npm run setup:timescale` runs all `db/migrations/timescale/*.sql` files in sorted order (001, 002, 003…). It is safe to re-run — every statement uses `IF NOT EXISTS`.
+
+After adding a new Prisma model: always run `npx prisma generate` to update the TypeScript client.
 
 ## Debugging Tips
 
-- **App DB**: Prisma Studio (`npx prisma studio`) — inspect Strategy, BacktestRun, PaperSession, IngestionJob
-- **TimescaleDB data**: `psql $DATABASE_URL -c "SELECT count(*) FROM candles WHERE exchange='binance'"`
-- **API responses**: Browser DevTools Network tab; API routes log to console in dev
-- **Bars data source**: Check `X-Data-Source` response header from `/api/strategies/:id/bars` — `real:binance:BTC/USDT:USDT` or `synthetic`
+- **App DB**: Prisma Studio (`npx prisma studio`) — Strategy, BacktestRun, PaperSession, IngestionJob
+- **TimescaleDB candles**: `psql $DATABASE_URL -c "SELECT count(*) FROM candles WHERE exchange='binance'"`
+- **TimescaleDB funding**: `psql $DATABASE_URL -c "SELECT count(*) FROM funding_rates"`
+- **TimescaleDB OI**: `psql $DATABASE_URL -c "SELECT count(*) FROM open_interest"`
+- **Coverage dashboard**: Browse to `/market-data` — shows per-series bar counts and recent jobs
+- **API data source**: Check `X-Data-Source` header from `/api/strategies/:id/bars`
 - **Backtest data source**: `BacktestRun.log.dataSourceLabel` — or see the badge in BacktestPanel
-- **Graph validation**: `npm run test` — includes `validator.test.ts`, `engine.test.ts`, `backtest.test.ts`
-- **Paper state**: `engineState` in PaperSession — inspect JSON for nodeValues, position, indicators
-- **Ingestion jobs**: `IngestionJob` rows in Prisma Studio — check `status`, `rowsInserted`, `error`
+- **Graph validation**: `npm run test` — 25 tests across validator, engine, backtest
+- **Paper state**: `engineState` in PaperSession JSON (Prisma Studio)
+- **Quality report**: `IngestionJob.meta` or console logs during `npm run ingest`
 
 ## Common Failure Cases
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| "Strategy not found" | Invalid ID or missing row | Check DB; use existing strategy from seed |
-| Save fails with validation errors | Invalid graph (cycle, missing nodes) | Fix graph in canvas; check validator output |
-| Backtest fails | Invalid graph, missing open/close | Ensure graph has open_position and close_position |
-| Backtest shows "⚠ Sample" badge | No real data in TimescaleDB | Run `npm run setup:timescale` then `npm run ingest` |
-| Paper session not advancing | No one polling | Keep Paper tab visible; polling runs only when mounted |
-| `X-Data-Source: synthetic` on bars | TimescaleDB not running or no data ingested | Start Docker container; run ingest |
-| Prisma connection error | DATABASE_URL wrong or DB down | Verify PostgreSQL running; check connection string |
-| `extension "timescaledb" must be preloaded` | Old Docker volume created by plain postgres image | `docker-compose down -v && docker-compose up -d` |
-| `prisma.ingestionJob` not found on type | Prisma client not regenerated after schema change | `npx prisma generate` |
+| "Strategy not found" | Invalid ID | Use existing strategy from seed |
+| Backtest shows "⚠ Sample" badge | No real data in TimescaleDB | `npm run setup:timescale && npm run ingest` |
+| `X-Data-Source: synthetic` on bars | TimescaleDB not running or no data | Start Docker; run ingest |
+| Prisma connection error | DATABASE_URL wrong or DB down | Verify PostgreSQL running |
+| `extension "timescaledb" must be preloaded` | Old Docker volume from plain postgres image | `docker-compose down -v && docker-compose up -d` |
+| `prisma.ingestionJob` not found | Prisma client not regenerated | `npx prisma generate` |
 | `@rollup/rollup-darwin-x64` missing | Platform binary not installed | `npm install` |
-| CCXT rate limit errors | Ingestion too aggressive | Already handled — rate limiter at 70% of RPM; wait and retry |
+| OI ingestion fails | Exchange doesn't support `fetchOpenInterestHistory` | Known limitation — only Binance futures and some Bybit/OKX endpoints support it |
+| CCXT rate limit errors | Network throttling from exchange | Rate limiter set to 70% of RPM; wait and retry |
+| Paper session not advancing | No one polling | Keep Paper tab visible |
 
-## How to Verify End-to-End
+## End-to-End Verification
 
-1. **Real bars**: GET `/api/strategies/:id/bars?timeframe=1h&limit=100` — check `X-Data-Source: real:binance:BTC/USDT:USDT`
-2. **Real backtest**: Open a BTC-PERP strategy → Backtest tab → Run. Expect "● Live" badge and `dataSourceLabel` showing bar count.
-3. **Chart**: After backtest, candlestick + equity pane should render with markers at entry/exit.
-4. **Paper trading**: Paper tab → Start. Wait; poll advances session. Stats and trades update. Stop or Reset to end.
-5. **Ingest more data**: `npm run ingest -- --symbol "ETH/USDT:USDT"` → create ETH-PERP strategy → backtest should use real ETH candles.
+1. **Coverage dashboard**: Browse `/market-data` — confirms candle, funding rate, OI row counts
+2. **Real bars**: GET `/api/strategies/:id/bars?timeframe=1h` — check `X-Data-Source: real:binance:BTC/USDT:USDT`
+3. **Real backtest**: Open BTC-PERP strategy → Backtest → expect "● Live" badge and bar count
+4. **Funding rates**: GET `/api/market-data/funding-rates?instrument=BTC-PERP&limit=5` after running `npm run ingest -- --dataType funding_rate`
+5. **Multi-exchange**: `npm run ingest -- --exchange bybit --symbol "BTC/USDT:USDT"` → check `/market-data` dashboard for new series
+6. **Quality report**: Run ingest; check console for `[quality]` lines and summary

@@ -8,10 +8,12 @@ BacktestRun   → Strategy, Trade[]
 Trade         → BacktestRun
 PaperSession  → Strategy, PaperTrade[]
 PaperTrade    → PaperSession
-IngestionJob  (standalone, tracks CCXT backfill jobs)
+IngestionJob  (standalone, tracks all data backfill jobs)
 
-TimescaleDB:
-  candles     (hypertable, partitioned by open_time)
+TimescaleDB (raw SQL, not Prisma):
+  candles          (hypertable, partitioned by open_time, 7-day chunks)
+  funding_rates    (hypertable, partitioned by funding_time, 1-day chunks)
+  open_interest    (hypertable, partitioned by ts, 7-day chunks)
 ```
 
 ## Prisma Models
@@ -23,7 +25,7 @@ TimescaleDB:
 | id | uuid | PK |
 | name | string | |
 | description | string? | |
-| instrument | string | e.g. "BTC-PERP"; resolved to exchange+symbol via INSTRUMENT_MAP |
+| instrument | string | e.g. "BTC-PERP"; resolved via INSTRUMENT_MAP |
 | timeframe | string | e.g. "1h" |
 | nodes | Json | React Flow nodes |
 | edges | Json | React Flow edges |
@@ -64,7 +66,6 @@ TimescaleDB:
   initialCapital: number;
   dataSource: "real" | "sample";
   dataSourceLabel: string;  // e.g. "binance BTC/USDT:USDT 1h (2159 bars, 100.0% coverage)"
-                            // or "Sample (synthetic 60-bar dataset)"
   error?: string;           // only on failed runs
 }
 ```
@@ -81,7 +82,7 @@ TimescaleDB:
 | exitTime, exitPrice | string?, float? | |
 | qty | float | |
 | pnl | float | |
-| reasonOpen, reasonClose | Json | Signal node IDs / reasons |
+| reasonOpen, reasonClose | Json | Signal node IDs |
 
 ### PaperSession
 
@@ -90,12 +91,12 @@ TimescaleDB:
 | id | uuid | PK |
 | strategyId | string | FK → Strategy |
 | status | string | idle, running, stopped, error |
-| instrument, timeframe | string | Copied from strategy at session start |
+| instrument, timeframe | string | Copied from strategy |
 | lastPrice | float | Last simulated bar close |
 | equity, realizedPnl, unrealizedPnl | float | |
-| positionSide, positionQty, positionEntryPrice | string?, float, float? | Current open position |
+| positionSide, positionQty, positionEntryPrice | string?, float, float? | |
 | positionOpenedAt | DateTime? | |
-| engineState | Json? | Serialized EngineState (indicators, nodeValues, position) |
+| engineState | Json? | Serialized EngineState |
 | startedAt, updatedAt, createdAt | DateTime | |
 
 ### PaperTrade
@@ -118,10 +119,10 @@ TimescaleDB:
 | exchange | string | e.g. "binance" |
 | symbol | string | CCXT unified, e.g. "BTC/USDT:USDT" |
 | timeframe | string | e.g. "1h" |
-| dataType | string | "candle" |
+| dataType | string | "candle" \| "funding_rate" \| "open_interest" |
 | startTime, endTime | DateTime | Requested window |
-| status | string | running, completed, failed |
-| rowsInserted | int? | Rows upserted into candles table |
+| status | string | pending, running, completed, failed |
+| rowsInserted | int? | Rows upserted |
 | error | string? | Error message on failure |
 | startedAt | DateTime? | |
 | completedAt | DateTime? | |
@@ -130,26 +131,73 @@ TimescaleDB:
 
 Indexes: `[status]`, `[exchange, symbol, dataType, startTime]`
 
-## TimescaleDB: candles Hypertable
+## TimescaleDB Tables
 
-Managed outside Prisma via `db/migrations/timescale/001_candles.sql`.
+All managed via `db/migrations/timescale/*.sql` (not Prisma). Run `npm run setup:timescale` to apply.
+
+### candles
 
 | Column | Type | Notes |
 |--------|------|-------|
+| open_time | TIMESTAMPTZ | Partition key (7-day chunks) |
 | exchange | TEXT | e.g. "binance" |
 | symbol | TEXT | CCXT unified e.g. "BTC/USDT:USDT" |
 | timeframe | TEXT | e.g. "1h" |
-| open_time | TIMESTAMPTZ | Partition key (7-day chunks) |
-| close_time | TIMESTAMPTZ | |
-| open, high, low, close | DOUBLE PRECISION | Native JS numbers, no string parsing |
+| open, high, low, close | DOUBLE PRECISION | Native JS numbers |
 | volume | DOUBLE PRECISION | Base asset volume |
 | quote_volume | DOUBLE PRECISION | |
-| trade_count | BIGINT | |
-| closed | BOOLEAN | false = in-progress bar |
+| trade_count | INTEGER | |
 
-**Unique index**: `(exchange, symbol, timeframe, open_time DESC)` — enables `ON CONFLICT DO NOTHING` for idempotent inserts.
+**Primary key / unique index**: `(open_time, exchange, symbol, timeframe)` → `ON CONFLICT DO NOTHING`  
+**Compression**: after 30 days, segmented by `(exchange, symbol, timeframe)`
 
-**Compression**: After 30 days, segmented by `(exchange, symbol, timeframe)`, ordered by `open_time DESC`.
+### funding_rates
+
+| Column | Type | Notes |
+|--------|------|-------|
+| funding_time | TIMESTAMPTZ | Partition key (1-day chunks) |
+| exchange | TEXT | |
+| symbol | TEXT | |
+| funding_rate | DOUBLE PRECISION | Decimal e.g. 0.0001 = 0.01% |
+| mark_price | DOUBLE PRECISION | Nullable |
+
+**Compression**: after 7 days, segmented by `(exchange, symbol)`
+
+### open_interest
+
+| Column | Type | Notes |
+|--------|------|-------|
+| ts | TIMESTAMPTZ | Partition key (7-day chunks) |
+| exchange | TEXT | |
+| symbol | TEXT | |
+| timeframe | TEXT | Snapshot granularity |
+| open_interest | DOUBLE PRECISION | Base asset quantity |
+| open_interest_value | DOUBLE PRECISION | Quote value (nullable) |
+
+**Compression**: after 30 days, segmented by `(exchange, symbol, timeframe)`
+
+## Instrument Resolution
+
+`lib/market-data/types.ts` — `INSTRUMENT_MAP`:
+
+```ts
+// Binance (default)
+"BTC-PERP"        → { exchange: "binance", symbol: "BTC/USDT:USDT" }
+"ETH-PERP"        → { exchange: "binance", symbol: "ETH/USDT:USDT" }
+"SOL-PERP"        → { exchange: "binance", symbol: "SOL/USDT:USDT" }
+"BNB-PERP"        → { exchange: "binance", symbol: "BNB/USDT:USDT" }
+"XRP-PERP"        → { exchange: "binance", symbol: "XRP/USDT:USDT" }
+"DOGE-PERP"       → { exchange: "binance", symbol: "DOGE/USDT:USDT" }
+
+// Bybit
+"BTC-PERP-BYBIT"  → { exchange: "bybit", symbol: "BTC/USDT:USDT" }
+"ETH-PERP-BYBIT"  → { exchange: "bybit", symbol: "ETH/USDT:USDT" }
+"SOL-PERP-BYBIT"  → { exchange: "bybit", symbol: "SOL/USDT:USDT" }
+
+// OKX
+"BTC-PERP-OKX"    → { exchange: "okx", symbol: "BTC/USDT:USDT" }
+"ETH-PERP-OKX"    → { exchange: "okx", symbol: "ETH/USDT:USDT" }
+```
 
 ## Strategy Graph Schema
 
@@ -158,19 +206,6 @@ Stored as `nodes` and `edges` JSON. Zod schemas in `lib/strategy/graphTypes.ts`:
 - **Nodes**: `{ id, type, position, data }`; type one of: price, volume, rsi, constant, compare, cross, and, or, not, open_position, close_position, set_risk
 - **Edges**: `{ id, source, target, sourceHandle?, targetHandle? }`
 - Validation: DAG, required open_position + (close_position or set_risk), no cycles
-
-## Instrument Resolution
-
-`lib/market-data/types.ts` — `INSTRUMENT_MAP`:
-
-```ts
-"BTC-PERP" → { exchange: "binance", symbol: "BTC/USDT:USDT" }
-"ETH-PERP" → { exchange: "binance", symbol: "ETH/USDT:USDT" }
-"SOL-PERP" → { exchange: "binance", symbol: "SOL/USDT:USDT" }
-"BNB-PERP" → { exchange: "binance", symbol: "BNB/USDT:USDT" }
-```
-
-Used in backtest route and bars route to bridge between the UI instrument name and the CCXT/TimescaleDB symbol.
 
 ## Persisted vs Ephemeral
 
@@ -183,7 +218,9 @@ Used in backtest route and bars route to bridge between the UI instrument name a
 | PaperTrade | ✅ DB (Prisma) | — |
 | IngestionJob | ✅ DB (Prisma) | — |
 | candles | ✅ TimescaleDB | — |
+| funding_rates | ✅ TimescaleDB | — |
+| open_interest | ✅ TimescaleDB | — |
 | EngineState | ✅ DB (PaperSession.engineState) | In-memory during step |
-| Draft graph | — | React state (AiPromptPanel → Workspace) |
+| Draft graph | — | React state |
 | Poll state | — | React component state |
 | Chart buffers | — | Lightweight Charts series data |

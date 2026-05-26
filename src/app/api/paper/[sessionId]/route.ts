@@ -75,7 +75,14 @@ export async function GET(
   }
 
   // Step through bars
-  const newTrades: Array<{
+  //
+  // Trade persistence strategy (mirrors backtest.ts lines 163-171):
+  //   OPENED → buffer a new open record (exitTime: null).
+  //   CLOSED → first check if the matching open is in the current buffer
+  //            (same poll batch). If so, fill it in place — one complete record,
+  //            no duplicate. If not (position was opened in a previous poll),
+  //            queue a DB update for the existing open PaperTrade row.
+  type TradeData = {
     sessionId: string;
     side: string;
     qty: number;
@@ -84,7 +91,11 @@ export async function GET(
     exitTime: Date | null;
     exitPrice: number | null;
     pnl: number;
-  }> = [];
+  };
+
+  const tradesToCreate: TradeData[] = [];
+  // Exit data for positions opened in a previous poll (update existing DB row)
+  const prevPollCloses: Array<{ exitTime: Date; exitPrice: number; pnl: number }> = [];
 
   let lastPrice = session.lastPrice;
   let currentTimeSec = Math.floor(lastUpdate.getTime() / 1000);
@@ -96,10 +107,9 @@ export async function GET(
     engineState = result.state;
     lastPrice = bar.close;
 
-    // Convert trade events to DB records
     for (const evt of result.events) {
       if (evt.kind === "OPENED") {
-        newTrades.push({
+        tradesToCreate.push({
           sessionId,
           side: evt.side,
           qty: evt.qty,
@@ -110,16 +120,24 @@ export async function GET(
           pnl: 0,
         });
       } else if (evt.kind === "CLOSED") {
-        newTrades.push({
-          sessionId,
-          side: evt.side,
-          qty: evt.qty,
-          entryTime: new Date(evt.entryTimeSec * 1000),
-          entryPrice: evt.entryPrice,
-          exitTime: new Date(evt.timeSec * 1000),
-          exitPrice: evt.exitPrice,
-          pnl: evt.pnl,
-        });
+        // Look for the matching open trade in the current batch first
+        const openIdx = tradesToCreate.findLastIndex((t) => t.exitTime === null);
+        if (openIdx >= 0) {
+          // Same-batch open+close: fill exit fields in place → single DB record
+          tradesToCreate[openIdx] = {
+            ...tradesToCreate[openIdx],
+            exitTime: new Date(evt.timeSec * 1000),
+            exitPrice: evt.exitPrice,
+            pnl: evt.pnl,
+          };
+        } else {
+          // Position was opened in a previous poll — update the existing DB row
+          prevPollCloses.push({
+            exitTime: new Date(evt.timeSec * 1000),
+            exitPrice: evt.exitPrice,
+            pnl: evt.pnl,
+          });
+        }
       }
     }
   }
@@ -160,13 +178,21 @@ export async function GET(
     return NextResponse.json(toSnapshot(latest as unknown as SessionRow));
   }
 
-  // We won the lock: persist new trades
-  if (newTrades.length > 0) {
-    await prisma.$transaction(
-      newTrades.map((t) =>
-        prisma.paperTrade.create({ data: t }),
+  // We won the lock: persist trades
+  if (tradesToCreate.length > 0 || prevPollCloses.length > 0) {
+    await prisma.$transaction([
+      // New records (opens, or same-batch open+close)
+      ...tradesToCreate.map((t) => prisma.paperTrade.create({ data: t })),
+      // Close the open record from a previous poll — update by sessionId + exitTime IS NULL.
+      // updateMany is safe here: a single-instrument engine can hold at most one open
+      // position at a time, so at most one row matches the predicate per close event.
+      ...prevPollCloses.map((c) =>
+        prisma.paperTrade.updateMany({
+          where: { sessionId, exitTime: null },
+          data: { exitTime: c.exitTime, exitPrice: c.exitPrice, pnl: c.pnl },
+        }),
       ),
-    );
+    ]);
   }
 
   const updated = await prisma.paperSession.findUnique({ where: { id: sessionId } });

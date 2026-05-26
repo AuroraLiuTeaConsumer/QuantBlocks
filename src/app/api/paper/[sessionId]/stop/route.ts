@@ -53,15 +53,14 @@ export async function POST(
       engineState: JSON.parse(JSON.stringify(closedState)) as Prisma.InputJsonValue,
     };
 
-    // Record closing trade
+    // Update the existing open PaperTrade record with exit data.
+    // forceClose always closes a position that was opened in a previous poll,
+    // so the open record already exists in DB (exitTime IS NULL). We update it
+    // in place rather than creating a duplicate closed record.
     if (event && event.kind === "CLOSED") {
-      await prisma.paperTrade.create({
+      await prisma.paperTrade.updateMany({
+        where: { sessionId, exitTime: null },
         data: {
-          sessionId,
-          side: event.side,
-          qty: event.qty,
-          entryTime: new Date(event.entryTimeSec * 1000),
-          entryPrice: event.entryPrice,
           exitTime: new Date(event.timeSec * 1000),
           exitPrice: event.exitPrice,
           pnl: event.pnl,

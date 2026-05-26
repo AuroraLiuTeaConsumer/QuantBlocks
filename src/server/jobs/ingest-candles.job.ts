@@ -1,22 +1,20 @@
 #!/usr/bin/env tsx
 /**
- * Historical candle ingestion job — CLI entry point.
+ * Historical data ingestion job — CLI entry point.
  *
- * Usage (defaults: Binance BTC/USDT:USDT 1h, last 90 days):
+ * Usage (defaults: Binance BTC/USDT:USDT 1h candles, last 90 days):
  *   npm run ingest
  *
  * Custom options:
  *   npm run ingest -- --exchange binance --symbol "BTC/USDT:USDT" --timeframe 1h --days 180
+ *   npm run ingest -- --dataType funding_rate --days 365
+ *   npm run ingest -- --dataType open_interest --timeframe 1h
+ *   npm run ingest -- --exchange bybit --symbol "BTC/USDT:USDT" --dataType candle
  *
  * ─── Prerequisites ───────────────────────────────────────────────────────────
  *   1. docker-compose up -d
- *      (TimescaleDB must be running with the DATABASE_URL in .env)
- *
- *   2. npm run setup:timescale
- *      (creates the candles hypertable — run once)
- *
- *   3. npx prisma migrate dev --name add_ingestion_job
- *      (creates the IngestionJob table — run once after updating schema.prisma)
+ *   2. npm run setup:timescale    (creates hypertables — run once)
+ *   3. npx prisma migrate dev     (creates IngestionJob table)
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -42,6 +40,8 @@ for (const f of [".env.local", ".env"]) {
 }
 
 import { HistoricalDataIngestionService } from "../../lib/market-data/ingestion/historical-service";
+import { FundingRateIngestionService } from "../../lib/market-data/ingestion/funding-rate-service";
+import { OpenInterestIngestionService } from "../../lib/market-data/ingestion/open-interest-service";
 import { prisma } from "../../lib/prisma";
 import type { Exchange, Timeframe } from "../../lib/market-data/types";
 
@@ -58,35 +58,44 @@ function parseArgs() {
   const symbol = flag("--symbol", "BTC/USDT:USDT");
   const timeframe = flag("--timeframe", "1h") as Timeframe;
   const days = parseInt(flag("--days", "90"), 10);
+  const dataType = flag("--dataType", "candle");
 
   const endTime = new Date();
   const startTime = new Date(endTime.getTime() - days * 24 * 60 * 60 * 1_000);
 
-  return { exchange, symbol, timeframe, startTime, endTime, days };
+  return { exchange, symbol, timeframe, startTime, endTime, days, dataType };
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const { exchange, symbol, timeframe, startTime, endTime, days } = parseArgs();
+  const { exchange, symbol, timeframe, startTime, endTime, days, dataType } = parseArgs();
 
   console.log("═══════════════════════════════════════════════════════════");
-  console.log("  QuantBlocks — Historical Candle Ingestion");
+  console.log("  QuantBlocks — Historical Data Ingestion");
   console.log("═══════════════════════════════════════════════════════════");
   console.log(`  Exchange  : ${exchange}`);
   console.log(`  Symbol    : ${symbol}`);
   console.log(`  Timeframe : ${timeframe}`);
+  console.log(`  Data Type : ${dataType}`);
   console.log(`  Range     : last ${days} days`);
   console.log(`  From      : ${startTime.toISOString()}`);
   console.log(`  To        : ${endTime.toISOString()}`);
   console.log("───────────────────────────────────────────────────────────\n");
 
-  // Record a job in Prisma for observability (best-effort — if Prisma table
-  // doesn't exist yet the ingest still runs, job tracking is skipped).
   let jobId: string | null = null;
   try {
     const job = await prisma.ingestionJob.create({
-      data: { exchange, symbol, timeframe, dataType: "candle", startTime, endTime },
+      data: {
+        exchange,
+        symbol,
+        timeframe,
+        dataType,
+        startTime,
+        endTime,
+        status: "running",
+        startedAt: new Date(),
+      },
     });
     jobId = job.id;
     console.log(`  Job ID: ${jobId}\n`);
@@ -96,13 +105,28 @@ async function main() {
     );
   }
 
-  const service = new HistoricalDataIngestionService();
-
   try {
-    const result = await service.ingest(
-      { exchange, symbol, timeframe, startTime, endTime },
-      (msg) => console.log(`  ${msg}`),
-    );
+    let result: { rowsInserted: number; gapsFilled: number; durationMs: number };
+
+    if (dataType === "funding_rate") {
+      const service = new FundingRateIngestionService();
+      result = await service.ingest(
+        { exchange, symbol, startTime, endTime },
+        (msg) => console.log(`  ${msg}`),
+      );
+    } else if (dataType === "open_interest") {
+      const service = new OpenInterestIngestionService();
+      result = await service.ingest(
+        { exchange, symbol, timeframe, startTime, endTime },
+        (msg) => console.log(`  ${msg}`),
+      );
+    } else {
+      const service = new HistoricalDataIngestionService();
+      result = await service.ingest(
+        { exchange, symbol, timeframe, startTime, endTime },
+        (msg) => console.log(`  ${msg}`),
+      );
+    }
 
     console.log("\n───────────────────────────────────────────────────────────");
     console.log(`  ✅  Rows inserted : ${result.rowsInserted}`);
@@ -117,6 +141,7 @@ async function main() {
           status: "completed",
           rowsInserted: result.rowsInserted,
           completedAt: new Date(),
+          meta: { gapsFilled: result.gapsFilled, durationMs: result.durationMs },
         },
       });
     }

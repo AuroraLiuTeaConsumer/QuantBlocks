@@ -35,6 +35,7 @@ export async function POST(
         positionSide: null,
         positionQty: 0,
         positionEntryPrice: null,
+        positionOpenedAt: null,
         engineState: Prisma.DbNull,
         startedAt: null,
       },

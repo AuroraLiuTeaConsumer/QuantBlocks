@@ -172,6 +172,11 @@ export const INSTRUMENT_MAP: Record<string, InstrumentMapping> = {
   // ── OKX ──────────────────────────────────────────────────────────────────
   "BTC-PERP-OKX": { exchange: "okx", symbol: "BTC/USDT:USDT" },
   "ETH-PERP-OKX": { exchange: "okx", symbol: "ETH/USDT:USDT" },
+
+  // ── Hyperliquid ───────────────────────────────────────────────────────────
+  "BTC-PERP-HL": { exchange: "hyperliquid", symbol: "BTC/USDT:USDT" },
+  "ETH-PERP-HL": { exchange: "hyperliquid", symbol: "ETH/USDT:USDT" },
+  "SOL-PERP-HL": { exchange: "hyperliquid", symbol: "SOL/USDT:USDT" },
 };
 
 /**

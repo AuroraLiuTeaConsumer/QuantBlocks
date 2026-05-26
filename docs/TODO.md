@@ -12,13 +12,15 @@
 | 14 | Gap detection UI / coverage dashboard | ✅ `/market-data` server page showing candle/FR/OI series + job history |
 | 15 | Data quality checks | ✅ `QualityChecker` validates OHLC, volume, price spikes per batch before insert |
 | 16 | Multi-exchange ingestion | ✅ Bybit + OKX in EXCHANGE_CONFIGS + INSTRUMENT_MAP entries + CLI `--exchange` flag |
+| 20 | Native Hyperliquid adapter | ✅ `NativeHyperliquidProvider` — REST candleSnapshot + fundingHistory endpoints |
+| 21 | WebSocket live candle ingestion | ✅ `ws-ingest.job.ts` — Binance USDT-M kline stream, native Node.js WebSocket, auto-reconnect |
+| 22 | Real-bar paper trading | ✅ `useRealBars` toggle on PaperSession; poll route replays TimescaleDB candles via `barCursor` |
 
 ## Active / In Progress
 
 | # | Issue | Impact | Notes |
 |---|-------|--------|-------|
-| 4 | Paper bars still synthetic | No real market simulation | Phase 3: replace with live Redis stream |
-| 5 | Paper execution only on poll | Gaps when tab hidden | Accept limitation; Phase 3 adds background worker |
+| 5 | Paper execution only on poll | Gaps when tab hidden | Accept limitation; future: background worker |
 
 ## Medium Priority
 
@@ -34,14 +36,13 @@
 | 18 | Coverage dashboard refresh | Page is static server-render; requires manual reload to reflect new data |
 | 19 | Quality report in BacktestPanel | `QualityReport` stored in `IngestionJob.meta` but not surfaced in the UI yet |
 
-## Phase 3 — Live Feed
+## Phase 4 (Next) — Redis + Advanced Live
 
 | # | Item |
 |---|------|
-| 20 | Native Hyperliquid adapter (REST + WebSocket) |
-| 21 | Live WebSocket candle feed → Redis pub/sub |
-| 22 | Paper trading advances on live Redis stream (replace poll) |
-| 23 | Session replay from recorded stream |
+| 23 | Redis pub/sub: broadcast closed candles to all open sessions |
+| 39 | Paper trading driven by live Redis stream (background worker, no poll needed) |
+| 40 | Session replay from stored stream |
 
 ## Phase 4 — Derivatives Data
 

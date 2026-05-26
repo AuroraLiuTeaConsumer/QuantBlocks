@@ -50,7 +50,7 @@ QuantBlocks is a full-stack Next.js application. Frontend and API routes run in 
 | StrategyCanvas | `components/strategy/StrategyCanvas.tsx` | React Flow graph, autosave, node types |
 | AiPromptPanel | `components/strategy/AiPromptPanel.tsx` | AI prompt UI, calls translateStrategy |
 | BacktestPanel | `components/strategy/BacktestPanel.tsx` | Run backtest, metrics, chart, data source badge |
-| PaperTradingPanel | `components/strategy/PaperTradingPanel.tsx` | Start/stop/reset, poll session+trades, chart |
+| PaperTradingPanel | `components/strategy/PaperTradingPanel.tsx` | Start/stop/reset, poll session+trades, chart; Real Bars toggle + Replay From date |
 | TwoPaneChart | `components/strategy/TwoPaneChart.tsx` | Candlestick/line + equity, markers, streaming |
 | MarketDataPage | `app/market-data/page.tsx` | Coverage dashboard: candles, funding rates, OI, jobs |
 | nodeTypes | `components/strategy/nodeTypes/` | React Flow node components per graph type |
@@ -74,29 +74,42 @@ QuantBlocks is a full-stack Next.js application. Frontend and API routes run in 
 ## Market Data Layer
 
 ```
-CCXT (Binance / Bybit / OKX USDT-perp)
-    └── CCXTProvider
-          ├── fetchCandles()           → HistoricalDataIngestionService
-          │       ├── GapDetector      — find missing candle ranges
-          │       ├── QualityChecker   — validate OHLC, volume, spikes
-          │       ├── RateLimiter      — sliding window, 70% of exchange RPM
-          │       └── TimescaleRepository.insertCandles()
-          │
-          ├── fetchFundingRates()      → FundingRateIngestionService
-          │       └── TimescaleRepository.insertFundingRates()
-          │
-          └── fetchOpenInterest()      → OpenInterestIngestionService
-                  └── TimescaleRepository.insertOpenInterest()
+CCXT (Binance / Bybit / OKX USDT-perp)         Hyperliquid REST
+    └── CCXTProvider                               └── NativeHyperliquidProvider
+          ├── fetchCandles()                             ├── fetchCandles()
+          ├── fetchFundingRates()                        ├── fetchFundingRates()
+          └── fetchOpenInterest()                        └── fetchOpenInterest() → []
 
-                          │
-                          ▼
-                  TimescaleDB hypertables:
-                    candles, funding_rates, open_interest
+Registry (providers/registry.ts)
+  exchange === 'hyperliquid' → NativeHyperliquidProvider
+  otherwise                 → CCXTProvider
+
+HistoricalDataIngestionService (candles)
+  ├── GapDetector      — find missing candle ranges
+  ├── QualityChecker   — validate OHLC, volume, spikes
+  ├── RateLimiter      — sliding window, 70% of exchange RPM
+  └── TimescaleRepository.insertCandles()
+
+FundingRateIngestionService  → TimescaleRepository.insertFundingRates()
+OpenInterestIngestionService → TimescaleRepository.insertOpenInterest()
+
+WebSocket live ingestion (ws-ingest.job.ts)
+  Binance USDT-M kline stream (native Node.js WebSocket)
+  → TimescaleRepository.insertCandles() on each closed candle
+
+                │
+                ▼
+        TimescaleDB hypertables:
+          candles, funding_rates, open_interest
 
 BacktestDataLoader.load()
     └── TimescaleRepository.queryCandles()
           → coverage ≥ 80%: return real candles
           → else: throw InsufficientDataError → fallback to SAMPLE_CANDLES
+
+Paper trading real-bar replay
+    └── TimescaleRepository.queryCandles(after=barCursor, limit=5)
+          → feed real closed candles to strategy engine per poll
 ```
 
 ## Data Quality Pipeline
@@ -114,7 +127,7 @@ Issues are logged as warnings but do **not** block ingestion. Aggregated `Qualit
 - **Strategy**: nodes, edges (JSON); instrument, timeframe.
 - **BacktestRun**: status, metrics, log (equityCurve, debugEvents, dataSource, dataSourceLabel, quality).
 - **Trade**: runId, side, entry/exit, qty, pnl.
-- **PaperSession**: status, engineState (JSON), equity, position.
+- **PaperSession**: status, engineState (JSON), equity, position, `useRealBars` (boolean), `barCursor` (DateTime? — last replayed candle open_time).
 - **PaperTrade**: sessionId, side, qty, entry/exit, pnl.
 - **IngestionJob**: exchange, symbol, timeframe, dataType, status, rowsInserted, meta.
 - **candles** (TimescaleDB): exchange, symbol, timeframe, open_time → OHLCV.
@@ -125,7 +138,8 @@ Issues are logged as warnings but do **not** block ingestion. Aggregated `Qualit
 
 1. **Save**: StrategyCanvas → PUT `/api/strategies/:id` → `validateGraph` → Prisma update.
 2. **Backtest**: BacktestPanel → POST `/api/strategies/:id/backtests` → `BacktestDataLoader.load()` → real candles (or SAMPLE_CANDLES fallback) → `runBacktest` → trades persisted.
-3. **Paper**: PaperTradingPanel → POST `/api/strategies/:id/paper/start` → PaperSession; GET `/api/paper/:sessionId` advances engine per poll.
+3. **Paper (synthetic)**: PaperTradingPanel → POST `/api/strategies/:id/paper/start` → PaperSession; GET `/api/paper/:sessionId` generates random-walk bars per poll.
+4. **Paper (real bars)**: POST start with `{ useRealBars: true, replayFrom?: ISO }` → PaperSession with `useRealBars=true`; poll route fetches up to 5 real candles from TimescaleDB after `barCursor`; advances engine + updates cursor.
 
 ## Separation of Concerns
 

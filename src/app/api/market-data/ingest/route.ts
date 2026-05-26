@@ -67,7 +67,14 @@ export async function POST(req: NextRequest) {
   }
   const timeframe: Timeframe = tfRaw;
 
-  const days = typeof body.days === "number" ? body.days : 90;
+  const daysRaw = typeof body.days === "number" ? body.days : 90;
+  if (!Number.isFinite(daysRaw) || daysRaw < 1 || Math.floor(daysRaw) !== daysRaw) {
+    return NextResponse.json(
+      { error: "days must be a positive integer (1–365)" },
+      { status: 400 },
+    );
+  }
+  const days = Math.min(daysRaw, 365);
   const dataType = (body.dataType as string) ?? "candle";
 
   if (!["candle", "funding_rate", "open_interest"].includes(dataType)) {

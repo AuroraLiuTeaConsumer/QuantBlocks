@@ -6,6 +6,9 @@ import { compileGraph, step, createInitialState } from "@/lib/strategy/engine";
 import type { EngineState, Bar } from "@/lib/strategy/engine";
 import type { StrategyGraph } from "@/lib/strategy/graphTypes";
 import type { Prisma } from "@prisma/client";
+import { getTimescaleRepo } from "@/lib/market-data/storage/timescale.repo";
+import { resolveInstrument } from "@/lib/market-data/types";
+import type { Timeframe } from "@/lib/market-data/types";
 
 /**
  * Generate a simulated bar using random-walk from the last known price.
@@ -63,12 +66,58 @@ export async function GET(
     ? (session.engineState as unknown as EngineState)
     : createInitialState(session.equity);
 
-  // Determine how many bars to simulate based on elapsed time
   const now = new Date();
   const lastUpdate = session.updatedAt;
-  const elapsedMs = now.getTime() - lastUpdate.getTime();
   const barIntervalMs = parseTimeframeMs(session.timeframe);
-  const barsToSim = Math.min(Math.floor(elapsedMs / barIntervalMs), 10); // cap at 10 bars per poll
+
+  // ── Determine bars to process this poll ───────────────────────────────────
+  // Real-bar mode: fetch the next N closed candles from TimescaleDB starting
+  //   from barCursor. One bar per poll so the UI updates smoothly.
+  // Synthetic mode: derive N bars from elapsed wall-clock time.
+
+  type RealBar = { openTime: Date; open: number; high: number; low: number; close: number };
+  let realBars: RealBar[] = [];
+  let newBarCursor: Date | null = session.barCursor ?? null;
+
+  if (session.useRealBars) {
+    const mapping = resolveInstrument(session.instrument);
+    if (mapping) {
+      try {
+        const repo = getTimescaleRepo();
+        // When no cursor yet, start from 90 days before session creation —
+        // matching the default ingestion window rather than querying from epoch.
+        const sessionStart = session.startedAt ?? new Date();
+        const defaultStart = new Date(sessionStart.getTime() - 90 * 24 * 3600 * 1_000);
+        const cursor = newBarCursor ?? defaultStart;
+        const candles = await repo.queryCandles({
+          exchange: mapping.exchange,
+          symbol: mapping.symbol,
+          timeframe: session.timeframe as Timeframe,
+          startTime: new Date(cursor.getTime() + 1), // strictly after cursor
+          endTime: new Date(Date.now() + barIntervalMs),
+          limit: 5, // at most 5 bars per poll; keeps replay at a reasonable pace
+        });
+        realBars = candles.map((c) => ({
+          openTime: c.openTime,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+        }));
+      } catch {
+        // TimescaleDB unavailable — fall through to synthetic
+      }
+    }
+
+    if (realBars.length === 0) {
+      // No new candles available yet (caught up or DB unavailable)
+      return NextResponse.json(toSnapshot(session as unknown as SessionRow));
+    }
+  }
+
+  const barsToSim = session.useRealBars
+    ? realBars.length
+    : Math.min(Math.floor((now.getTime() - lastUpdate.getTime()) / barIntervalMs), 10);
 
   if (barsToSim === 0) {
     return NextResponse.json(toSnapshot(session as unknown as SessionRow));
@@ -101,8 +150,21 @@ export async function GET(
   let currentTimeSec = Math.floor(lastUpdate.getTime() / 1000);
 
   for (let i = 0; i < barsToSim; i++) {
-    currentTimeSec += Math.floor(barIntervalMs / 1000);
-    const bar = simulateBar(lastPrice, currentTimeSec);
+    let bar: Bar;
+    if (session.useRealBars && realBars[i]) {
+      const rb = realBars[i];
+      bar = {
+        timeSec: Math.floor(rb.openTime.getTime() / 1000),
+        open: rb.open,
+        high: rb.high,
+        low: rb.low,
+        close: rb.close,
+      };
+      newBarCursor = rb.openTime;
+    } else {
+      currentTimeSec += Math.floor(barIntervalMs / 1000);
+      bar = simulateBar(lastPrice, currentTimeSec);
+    }
     const result = step(compiled.value, bar, engineState);
     engineState = result.state;
     lastPrice = bar.close;
@@ -162,6 +224,7 @@ export async function GET(
     positionOpenedAt: engineState.position
       ? new Date(engineState.position.entryTimeSec * 1000)
       : null,
+    ...(newBarCursor !== null ? { barCursor: newBarCursor } : {}),
     engineState: JSON.parse(JSON.stringify(engineState)) as Prisma.InputJsonValue,
   };
 

@@ -103,10 +103,29 @@
 
 ## Paper Trading Flow
 
-1. **Start**: POST `/api/strategies/:id/paper/start` → PaperSession (status=running)
-2. **Poll**: GET `/api/paper/:sessionId` → advance engine with synthetic bars, persist trades, optimistic lock
-3. **Stop**: POST `/api/paper/:sessionId/stop` → force-close, status=stopped
-4. **Reset**: POST `/api/paper/:sessionId/reset` → delete trades, reset to idle
+### Start
+
+POST `/api/strategies/:id/paper/start`  
+**Body** (all optional): `{ useRealBars?: boolean, replayFrom?: ISO date string }`
+
+Creates PaperSession with `useRealBars` and `barCursor` (= `replayFrom` or null).
+
+### Poll (synthetic mode — default)
+
+GET `/api/paper/:sessionId` → computes elapsed time → generates up to 10 synthetic random-walk bars → steps engine → persists trades (optimistic lock)
+
+### Poll (real-bar mode)
+
+GET `/api/paper/:sessionId` (when `useRealBars=true`):
+1. Resolves `session.instrument` → exchange + CCXT symbol via `INSTRUMENT_MAP`
+2. Queries TimescaleDB: `queryCandles({ startTime: barCursor + 1ms, limit: 5 })`
+3. Feeds real candles to engine; updates `barCursor` to last candle's `open_time`
+4. If no candles available (caught up or DB unavailable), returns current snapshot unchanged
+
+### Stop / Reset
+
+- **Stop**: POST `/api/paper/:sessionId/stop` → force-close, status=stopped
+- **Reset**: POST `/api/paper/:sessionId/reset` → delete trades, clear engineState + barCursor, status=idle
 
 ## Ingestion Flow (all data types)
 

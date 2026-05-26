@@ -26,7 +26,12 @@ npm run ingest
 npm run ingest -- --dataType funding_rate
 npm run ingest -- --dataType open_interest --timeframe 1h
 
-# 7. Run
+# 7. (Optional) Start WebSocket live candle ingestion (Binance futures, keeps candles fresh)
+npm run ws:ingest
+# Custom symbols/timeframe:
+npm run ws:ingest -- --symbols BTCUSDT,ETHUSDT --timeframe 1m
+
+# 8. Run
 npm run dev
 ```
 
@@ -63,6 +68,8 @@ No other env vars are currently required (Binance public OHLCV is unauthenticate
 | Ingest (custom) | `npm run ingest -- --exchange bybit --symbol "BTC/USDT:USDT" --timeframe 1h --days 180` | |
 | Ingest funding rates | `npm run ingest -- --dataType funding_rate --days 365` | |
 | Ingest open interest | `npm run ingest -- --dataType open_interest --timeframe 1h` | |
+| WS live ingestion | `npm run ws:ingest` | Binance futures kline stream; auto-reconnects |
+| WS custom | `npm run ws:ingest -- --symbols BTCUSDT,ETHUSDT --timeframe 1m` | |
 
 ## Prisma
 

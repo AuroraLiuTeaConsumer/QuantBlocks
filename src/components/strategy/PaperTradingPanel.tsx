@@ -27,6 +27,8 @@ type SessionSnapshot = {
   realizedPnl: number;
   unrealizedPnl: number;
   position: Position;
+  useRealBars: boolean;
+  barCursor: string | null;
   startedAt: string | null;
   updatedAt: string;
 };
@@ -105,6 +107,8 @@ export function PaperTradingPanel({
   const [trades, setTrades] = useState<PaperTrade[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [useRealBars, setUseRealBars] = useState(false);
+  const [replayFrom, setReplayFrom] = useState("");
 
   const mountedRef = useRef(true);
   const sessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -233,8 +237,12 @@ export function PaperTradingPanel({
     setLoading(true);
     resetChart();
     try {
+      const body: Record<string, unknown> = { useRealBars };
+      if (useRealBars && replayFrom) body.replayFrom = replayFrom;
       const res = await fetch(`/api/strategies/${strategyId}/paper/start`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!mountedRef.current) return;
@@ -305,6 +313,7 @@ export function PaperTradingPanel({
   const canStart = !isRunning && !disableRun && !loading;
   const canStop = isRunning;
   const canReset = session != null && !isRunning;
+  const activeUseRealBars = session?.useRealBars ?? false;
 
   const statusStyle = (() => {
     switch (status) {
@@ -324,7 +333,7 @@ export function PaperTradingPanel({
   return (
     <div className="flex shrink-0 flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between gap-4 border-b border-line px-4 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2">
         <div className="flex items-center gap-2.5">
           <span
             className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize"
@@ -338,7 +347,43 @@ export function PaperTradingPanel({
               style={{ background: "var(--accent)" }}
             />
           )}
+          {isRunning && (
+            <span
+              className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
+              style={{
+                background: activeUseRealBars ? "var(--accent-bg)" : "var(--surface-2)",
+                color: activeUseRealBars ? "var(--accent)" : "var(--text-2)",
+              }}
+            >
+              {activeUseRealBars ? "Real Bars" : "Synthetic"}
+            </span>
+          )}
         </div>
+
+        {/* Real bars config — only shown when not running */}
+        {!isRunning && (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-ink-2">
+            <label className="flex cursor-pointer items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={useRealBars}
+                onChange={(e) => setUseRealBars(e.target.checked)}
+                className="accent-accent h-3.5 w-3.5 cursor-pointer"
+              />
+              <span className="select-none font-medium">Real Bars</span>
+            </label>
+            {useRealBars && (
+              <input
+                type="date"
+                value={replayFrom}
+                onChange={(e) => setReplayFrom(e.target.value)}
+                className="rounded border border-line bg-surface px-2 py-0.5 text-[11px] text-ink-1 focus:outline-none focus:ring-1 focus:ring-accent"
+                placeholder="Replay from (optional)"
+              />
+            )}
+          </div>
+        )}
+
         <div className="flex gap-2">
           {canReset && (
             <button
@@ -516,7 +561,7 @@ export function PaperTradingPanel({
             Paper trading not active
           </div>
           <div className="text-[11px] text-ink-3">
-            Simulates live execution against a synthetic feed
+            Use synthetic bars or enable Real Bars to replay from TimescaleDB
           </div>
         </div>
       )}

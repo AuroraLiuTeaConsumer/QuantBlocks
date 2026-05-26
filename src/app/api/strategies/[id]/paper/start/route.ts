@@ -9,10 +9,26 @@ const INITIAL_EQUITY = 10_000;
 const INITIAL_PRICE = 100;
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+
+  // Optional body: { useRealBars?: boolean; replayFrom?: string (ISO date) }
+  let useRealBars = false;
+  let barCursor: Date | null = null;
+  try {
+    const body = await req.json() as Record<string, unknown>;
+    if (body.useRealBars === true) {
+      useRealBars = true;
+      if (typeof body.replayFrom === "string" && body.replayFrom) {
+        const d = new Date(body.replayFrom);
+        if (!isNaN(d.getTime())) barCursor = d;
+      }
+    }
+  } catch {
+    // empty / non-JSON body — use defaults
+  }
 
   const strategy = await prisma.strategy.findUnique({ where: { id } });
   if (!strategy) {
@@ -44,6 +60,8 @@ export async function POST(
       positionSide: null,
       positionQty: 0,
       positionEntryPrice: null,
+      useRealBars,
+      barCursor,
       engineState: JSON.parse(JSON.stringify(engineState)) as Prisma.InputJsonValue,
       startedAt: new Date(),
     },

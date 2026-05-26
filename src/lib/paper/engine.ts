@@ -24,6 +24,8 @@ export type SessionSnapshot = {
     qty: number;
     entryPrice: number | null;
   };
+  useRealBars: boolean;
+  barCursor: string | null; // ISO timestamp of last replayed candle
   startedAt: string | null;
   updatedAt: string;
 };
@@ -42,6 +44,8 @@ export type SessionRow = {
   positionSide: string | null;
   positionQty: number;
   positionEntryPrice: number | null;
+  useRealBars: boolean;
+  barCursor: Date | null;
   startedAt: Date | null;
   updatedAt: Date;
 };
@@ -64,6 +68,8 @@ export function toSnapshot(row: SessionRow): SessionSnapshot {
       qty: row.positionQty,
       entryPrice: row.positionEntryPrice,
     },
+    useRealBars: row.useRealBars,
+    barCursor: row.barCursor?.toISOString() ?? null,
     startedAt: row.startedAt?.toISOString() ?? null,
     updatedAt: row.updatedAt.toISOString(),
   };

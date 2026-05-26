@@ -22,6 +22,7 @@ Vision: **TradingView + Hyperliquid + AI Strategy Builder**.
 | M4 Paper Trading | 🚧 In Progress | Synthetic bars; real feed in Phase 3 |
 | **M5 Real Market Data** | ✅ Done | TimescaleDB hypertable, CCXT ingestion, BacktestDataLoader |
 | **M6 Data Quality & Coverage** | ✅ Done | Funding rates, open interest, quality checker, coverage dashboard, multi-exchange |
+| **M7 Real-Bar Paper Trading** | ✅ Done | Hyperliquid native provider, WebSocket live ingestion, real-bar replay in paper trading |
 
 ## Stack
 
@@ -33,7 +34,8 @@ Vision: **TradingView + Hyperliquid + AI Strategy Builder**.
 | Validation | Zod |
 | App database | PostgreSQL + Prisma |
 | Market data store | TimescaleDB (same PostgreSQL instance, raw SQL hypertable — candles, funding_rates, open_interest) |
-| Market data fetch | CCXT (Binance, Bybit, OKX perpetuals) |
+| Market data fetch | CCXT (Binance, Bybit, OKX perpetuals); native REST for Hyperliquid |
+| Live candle feed | Native Node.js 22+ WebSocket → Binance USDT-M futures kline stream |
 | Data access | `pg` Pool (TimescaleDB); Prisma (app tables) |
 | Engine | Custom strategy runtime (`lib/strategy/engine`) |
 
@@ -61,7 +63,12 @@ npm run ingest
 npm run ingest -- --dataType funding_rate
 npm run ingest -- --dataType open_interest --timeframe 1h
 
-# 7. Run
+# 7. (Optional) Start WebSocket live candle ingestion (Binance futures)
+npm run ws:ingest
+# Custom symbols/timeframe:
+npm run ws:ingest -- --symbols BTCUSDT,ETHUSDT --timeframe 1m
+
+# 8. Run
 npm run dev
 ```
 
@@ -80,9 +87,9 @@ Steps 4–5 are optional: the app falls back to a synthetic 60-bar sample if no 
 
 ## Known Limitations
 
-- **Paper trading bars**: Still synthetic random-walk. Phase 3 will replace with live Redis stream.
 - **AI strategy**: Stub only — returns same RSI strategy for any prompt.
 - **Paper execution on poll**: No background worker; engine advances only when the client tab is visible and polling.
+- **Real-bar replay speed**: At most 5 candles per poll (≈1 s interval) to keep the UI responsive.
 - **Single instrument ingested by default**: Run `npm run ingest -- --symbol "ETH/USDT:USDT"` to add more.
 
 ## Roadmap
@@ -91,6 +98,6 @@ Steps 4–5 are optional: the app falls back to a synthetic 60-bar sample if no 
 |-------|------|--------|
 | 1 | Real historical candles in backtest (CCXT → TimescaleDB) | ✅ Done |
 | 2 | Funding rates, open interest, quality checks, multi-exchange, coverage dashboard | ✅ Done |
-| 3 | Native Hyperliquid adapter, live WebSocket, Redis pub/sub | Planned |
+| 3 | Native Hyperliquid adapter, WebSocket live ingestion, real-bar paper trading | ✅ Done |
 | 4 | CoinGlass derivatives data (liquidations, long/short ratios) | Planned |
-| 5 | Paper trading on live Redis stream, session replay | Planned |
+| 5 | Redis pub/sub for live session broadcast, multi-session UI | Planned |

@@ -97,6 +97,8 @@ TimescaleDB (raw SQL, not Prisma):
 | positionSide, positionQty, positionEntryPrice | string?, float, float? | |
 | positionOpenedAt | DateTime? | |
 | engineState | Json? | Serialized EngineState |
+| useRealBars | Boolean | Default false; replay real TimescaleDB candles instead of synthetic |
+| barCursor | DateTime? | Last replayed candle's open_time; null = start from earliest |
 | startedAt, updatedAt, createdAt | DateTime | |
 
 ### PaperTrade
@@ -197,6 +199,11 @@ All managed via `db/migrations/timescale/*.sql` (not Prisma). Run `npm run setup
 // OKX
 "BTC-PERP-OKX"    → { exchange: "okx", symbol: "BTC/USDT:USDT" }
 "ETH-PERP-OKX"    → { exchange: "okx", symbol: "ETH/USDT:USDT" }
+
+// Hyperliquid
+"BTC-PERP-HL"     → { exchange: "hyperliquid", symbol: "BTC/USDT:USDT" }
+"ETH-PERP-HL"     → { exchange: "hyperliquid", symbol: "ETH/USDT:USDT" }
+"SOL-PERP-HL"     → { exchange: "hyperliquid", symbol: "SOL/USDT:USDT" }
 ```
 
 ## Strategy Graph Schema

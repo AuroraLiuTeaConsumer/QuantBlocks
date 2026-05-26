@@ -112,7 +112,14 @@ export async function POST(req: NextRequest) {
     symbol = (body.symbol as string) ?? "BTC/USDT:USDT";
   }
 
-  const days = typeof body.days === "number" ? body.days : 90;
+  const daysRaw = typeof body.days === "number" ? body.days : 90;
+  if (!Number.isFinite(daysRaw) || daysRaw < 1 || Math.floor(daysRaw) !== daysRaw) {
+    return NextResponse.json(
+      { error: "days must be a positive integer (1–365)" },
+      { status: 400 },
+    );
+  }
+  const days = Math.min(daysRaw, 365);
   const endTime = new Date();
   const startTime = new Date(endTime.getTime() - days * 24 * 3600 * 1_000);
 

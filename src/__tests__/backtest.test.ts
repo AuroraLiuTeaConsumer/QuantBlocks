@@ -35,12 +35,19 @@ describe("backtest engine", () => {
     expect(result.equityCurve.length).toBe(SAMPLE_CANDLES.length);
   });
 
-  it("closed trades have non-null exit fields", () => {
+  it("closed trades have non-null exit fields; open legs have null exits", () => {
     const result = runBacktest(exampleGraph, SAMPLE_CANDLES, DEFAULT_CONFIG);
-    for (const t of result.trades) {
-      expect(t.exitPrice).not.toBeNull();
+    const closed = result.trades.filter((t) => t.exitPrice !== null);
+    expect(closed.length).toBeGreaterThan(0);
+    for (const t of closed) {
       expect(t.exitTime).not.toBeNull();
       expect(t.reasonClose).not.toBeNull();
+    }
+    const open = result.trades.filter((t) => t.exitPrice === null);
+    for (const t of open) {
+      expect(t.exitTime).toBeNull();
+      expect(t.reasonClose).toBeNull();
+      expect(t.pnl).toBe(0);
     }
   });
 

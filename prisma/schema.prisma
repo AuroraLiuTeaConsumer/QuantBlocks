@@ -91,3 +91,27 @@ model PaperTrade {
 
   @@index([sessionId, entryTime])
 }
+
+// ─── Market Data Ingestion ────────────────────────────────────
+// Tracks historical backfill jobs. TimescaleDB candle data lives
+// in the raw SQL schema (db/migrations/timescale/); this table
+// just records job status so the API can expose progress.
+model IngestionJob {
+  id           String    @id @default(uuid())
+  exchange     String                         // 'binance', 'bybit', …
+  symbol       String                         // CCXT unified: 'BTC/USDT:USDT'
+  timeframe    String                         // '1m', '1h', …
+  dataType     String    @default("candle")   // 'candle' (phase 1); 'funding', 'oi' later
+  startTime    DateTime
+  endTime      DateTime
+  status       String    @default("pending")  // 'pending'|'running'|'completed'|'failed'
+  rowsInserted Int?
+  error        String?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  meta         Json?                          // retry count, last cursor, etc.
+
+  @@index([status])
+  @@index([exchange, symbol, dataType, startTime])
+}

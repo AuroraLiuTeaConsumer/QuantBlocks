@@ -17,6 +17,8 @@ type BacktestRun = {
     equityCurve?: EquityPoint[];
     error?: string;
     initialCapital?: number;
+    dataSource?: "real" | "sample";
+    dataSourceLabel?: string;
   } | null;
   startTime?: string | null;
   endTime?: string | null;
@@ -163,6 +165,7 @@ export function BacktestPanel({
   const [bars, setBars] = useState<BarItem[] | undefined>(undefined);
   const [barsUnavailable, setBarsUnavailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dataSourceLabel, setDataSourceLabel] = useState<string | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
   const strategyIdRef = useRef(strategyId);
@@ -226,6 +229,7 @@ export function BacktestPanel({
     (run: BacktestRun, rid: string) => {
       setMetrics(run.metrics ?? null);
       setStatus("success");
+      setDataSourceLabel(run.log?.dataSourceLabel ?? null);
 
       const logCurve = run.log?.equityCurve;
       if (Array.isArray(logCurve) && logCurve.length > 0) {
@@ -308,6 +312,7 @@ export function BacktestPanel({
     setTrades([]);
     setBars(undefined);
     setBarsUnavailable(false);
+    setDataSourceLabel(null);
     setStatus("running");
 
     try {
@@ -401,6 +406,23 @@ export function BacktestPanel({
             {status === "success" && "Completed"}
             {status === "error" && "Error"}
           </span>
+          {/* Data source badge — shown after a successful run */}
+          {status === "success" && dataSourceLabel && (
+            <span
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-medium"
+              style={{
+                background: dataSourceLabel.startsWith("Sample")
+                  ? "var(--amber-bg)"
+                  : "var(--accent-bg)",
+                color: dataSourceLabel.startsWith("Sample")
+                  ? "var(--amber)"
+                  : "var(--accent)",
+              }}
+            >
+              {dataSourceLabel.startsWith("Sample") ? "⚠ Sample" : "● Live"}&nbsp;
+              {dataSourceLabel}
+            </span>
+          )}
         </div>
         <button
           type="button"

@@ -1,6 +1,9 @@
 services:
   postgres:
-    image: postgres:16
+    # TimescaleDB on PG16 — drop-in replacement for postgres:16.
+    # If upgrading from postgres:16: docker-compose down (keep volume),
+    # swap the image, then docker-compose up. Run setup-timescale once.
+    image: timescale/timescaledb:latest-pg16
     restart: unless-stopped
     ports:
       - "5432:5432"

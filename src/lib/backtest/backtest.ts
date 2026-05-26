@@ -132,7 +132,19 @@ export function runBacktest(
     if (evt.kind === "OPENED") {
       const entryPrice = applySlippage(evt.entryPrice, evt.side, config.slippageBps);
       cumulativeFees += entryPrice * evt.qty * (config.feeBps / 10_000);
-      lastOpenReason = `open_position(${evt.sourceNodeId})`;
+      const reasonOpen = `open_position(${evt.sourceNodeId})`;
+      lastOpenReason = reasonOpen;
+      trades.push({
+        side: evt.side,
+        entryTime: new Date(evt.timeSec * 1000).toISOString(),
+        entryPrice,
+        exitTime: null,
+        exitPrice: null,
+        qty: evt.qty,
+        pnl: 0,
+        reasonOpen,
+        reasonClose: null,
+      });
       debugEvents.push(`[bar ${barIndex}] Opened ${evt.side} @ ${entryPrice}`);
       return;
     }
@@ -145,18 +157,31 @@ export function runBacktest(
     const exitFee = exitPrice * evt.qty * (config.feeBps / 10_000);
     cumulativeFees += exitFee;
     const netPnl = round(evt.pnl - exitFee);
+    const exitTime = new Date(evt.timeSec * 1000).toISOString();
+    const reasonClose = mapCloseReason(evt);
 
-    trades.push({
-      side: evt.side,
-      entryTime: new Date(evt.entryTimeSec * 1000).toISOString(),
-      entryPrice: evt.entryPrice,
-      exitTime: new Date(evt.timeSec * 1000).toISOString(),
-      exitPrice,
-      qty: evt.qty,
-      pnl: netPnl,
-      reasonOpen: lastOpenReason || `open_position`,
-      reasonClose: mapCloseReason(evt),
-    });
+    const openIdx = trades.findLastIndex((t) => t.exitPrice === null);
+    if (openIdx >= 0) {
+      trades[openIdx] = {
+        ...trades[openIdx],
+        exitTime,
+        exitPrice,
+        pnl: netPnl,
+        reasonClose,
+      };
+    } else {
+      trades.push({
+        side: evt.side,
+        entryTime: new Date(evt.entryTimeSec * 1000).toISOString(),
+        entryPrice: evt.entryPrice,
+        exitTime,
+        exitPrice,
+        qty: evt.qty,
+        pnl: netPnl,
+        reasonOpen: lastOpenReason || `open_position`,
+        reasonClose,
+      });
+    }
     debugEvents.push(
       `[bar ${barIndex}] Closed ${evt.side} @ ${exitPrice} (${evt.reason}) pnl=${netPnl}`,
     );

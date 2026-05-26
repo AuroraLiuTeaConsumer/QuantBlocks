@@ -1,25 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-
-/**
- * Bar spacing in seconds for each timeframe string.
- * Used to generate synthetic OHLC bars ending at now (UTC).
- */
-const TIMEFRAME_SECONDS: Record<string, number> = {
-  "1m": 60,
-  "5m": 5 * 60,
-  "15m": 15 * 60,
-  "1h": 60 * 60,
-  "4h": 4 * 60 * 60,
-  "1d": 24 * 60 * 60,
-};
+import { getTimescaleRepo } from "@/lib/market-data/storage/timescale.repo";
+import { resolveInstrument, isTimeframe } from "@/lib/market-data/types";
+import type { Timeframe } from "@/lib/market-data/types";
 
 const DEFAULT_TIMEFRAME = "1h";
 const DEFAULT_LIMIT = 500;
-const MAX_LIMIT = 2000;
+const MAX_LIMIT = 2_000;
 
+// Bar shape expected by TwoPaneChart / lightweight-charts
 export type BarItem = {
-  time: number;
+  time: number; // UTC seconds
   open: number;
   high: number;
   low: number;
@@ -27,78 +18,131 @@ export type BarItem = {
   volume?: number;
 };
 
-function getBarSpacingSeconds(timeframe: string): number {
-  const normalized = timeframe.toLowerCase().trim();
-  return TIMEFRAME_SECONDS[normalized] ?? TIMEFRAME_SECONDS[DEFAULT_TIMEFRAME];
-}
+// ─── Synthetic fallback ───────────────────────────────────────────────────────
 
-/**
- * Generate synthetic OHLC bars (random walk) for MVP stub.
- * Bars end at now (UTC seconds). High >= max(open, close), low <= min(open, close).
- */
-function generateSyntheticBars(
-  barSpacingSeconds: number,
-  limit: number
-): BarItem[] {
-  const nowSec = Math.floor(Date.now() / 1000);
-  const startSec = nowSec - (limit - 1) * barSpacingSeconds;
+const TIMEFRAME_SECONDS: Record<string, number> = {
+  "1m": 60,
+  "5m": 300,
+  "15m": 900,
+  "1h": 3_600,
+  "4h": 14_400,
+  "1d": 86_400,
+};
+
+function generateSyntheticBars(barSpacingSec: number, limit: number): BarItem[] {
+  const nowSec = Math.floor(Date.now() / 1_000);
+  const startSec = nowSec - (limit - 1) * barSpacingSec;
 
   const bars: BarItem[] = [];
-  let price = 40000 + Math.random() * 10000; // start around 40k–50k
+  let price = 40_000 + Math.random() * 10_000;
 
   for (let i = 0; i < limit; i++) {
-    const time = startSec + i * barSpacingSeconds;
     const open = price;
     const change = (Math.random() - 0.48) * 800;
-    const close = Math.max(1000, open + change);
-    const high = Math.max(open, close) + Math.random() * 200;
-    const low = Math.min(open, close) - Math.random() * 200;
-    const volume = Math.floor(Math.random() * 100) + 10;
-
-    bars.push({ time, open, high, low, close, volume });
+    const close = Math.max(1_000, open + change);
+    bars.push({
+      time: startSec + i * barSpacingSec,
+      open,
+      high: Math.max(open, close) + Math.random() * 200,
+      low: Math.min(open, close) - Math.random() * 200,
+      close,
+      volume: Math.floor(Math.random() * 100) + 10,
+    });
     price = close;
   }
 
   return bars;
 }
 
+// ─── Route ───────────────────────────────────────────────────────────────────
+
 /**
  * GET /api/strategies/:id/bars?timeframe=<string>&limit=<number>
- * Returns JSON array of { time, open, high, low, close, volume? }.
- * time is Unix seconds (UTCTimestamp).
  *
- * MVP: synthetic OHLC from generateSyntheticBars().
- * To use real exchange data later: fetch OHLC from your exchange (e.g. Hyperliquid
- * or Binance) for the strategy’s instrument and timeframe, map to the same BarItem
- * shape (time in UTC seconds), and return here instead of calling generateSyntheticBars.
+ * Returns BarItem[] (time in UTC seconds) for the strategy's instrument.
+ *
+ * Data priority:
+ *   1. TimescaleDB real candles (when data has been ingested for this instrument)
+ *   2. Synthetic random-walk bars (fallback — always works, clearly labelled)
+ *
+ * The X-Data-Source response header tells the client which source was used.
  */
 export async function GET(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+
   const strategy = await prisma.strategy.findUnique({ where: { id } });
   if (!strategy) {
     return NextResponse.json({ error: "Strategy not found" }, { status: 404 });
   }
 
   const { searchParams } = new URL(req.url);
-  const timeframe = searchParams.get("timeframe") ?? strategy.timeframe ?? DEFAULT_TIMEFRAME;
+  const timeframeParam =
+    searchParams.get("timeframe") ?? strategy.timeframe ?? DEFAULT_TIMEFRAME;
   const limitRaw = searchParams.get("limit");
   const limit = Math.min(
     Math.max(1, limitRaw ? parseInt(limitRaw, 10) : DEFAULT_LIMIT),
-    MAX_LIMIT
+    MAX_LIMIT,
   );
 
   if (Number.isNaN(limit)) {
-    return NextResponse.json(
-      { error: "Invalid limit parameter" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "Invalid limit parameter" }, { status: 400 });
   }
 
-  const barSpacingSeconds = getBarSpacingSeconds(timeframe);
-  const bars = generateSyntheticBars(barSpacingSeconds, limit);
+  // ── Attempt real data from TimescaleDB ───────────────────────────────────
 
-  return NextResponse.json(bars);
+  const mapping = resolveInstrument(strategy.instrument);
+  const tf = isTimeframe(timeframeParam) ? (timeframeParam as Timeframe) : null;
+
+  if (mapping && tf) {
+    try {
+      const repo = getTimescaleRepo();
+      const endTime = new Date();
+      const startTime = new Date(endTime.getTime() - 90 * 24 * 3_600 * 1_000);
+
+      const candles = await repo.queryCandles({
+        exchange: mapping.exchange,
+        symbol: mapping.symbol,
+        timeframe: tf,
+        startTime,
+        endTime,
+        limit,
+      });
+
+      if (candles.length > 0) {
+        const bars: BarItem[] = candles.map((c) => ({
+          time: Math.floor(c.openTime.getTime() / 1_000),
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+          volume: c.volume,
+        }));
+
+        return NextResponse.json(bars, {
+          headers: {
+            "X-Data-Source": `real:${mapping.exchange}:${mapping.symbol}`,
+          },
+        });
+      }
+    } catch (err) {
+      // TimescaleDB not yet set up or no data — fall through to synthetic
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[bars] Real data unavailable, using synthetic: ${msg}`);
+    }
+  }
+
+  // ── Synthetic fallback ───────────────────────────────────────────────────
+
+  const barSpacingSec =
+    TIMEFRAME_SECONDS[timeframeParam.toLowerCase()] ??
+    TIMEFRAME_SECONDS[DEFAULT_TIMEFRAME];
+
+  const bars = generateSyntheticBars(barSpacingSec, limit);
+
+  return NextResponse.json(bars, {
+    headers: { "X-Data-Source": "synthetic" },
+  });
 }

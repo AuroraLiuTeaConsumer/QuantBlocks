@@ -21,15 +21,19 @@ QuantBlocks is a full-stack Next.js application. Frontend and API routes run in 
 │  │ API Routes: /api/strategies, /api/backtests, /api/paper,         ││
 │  │             /api/ai/translateStrategy,                           ││
 │  │             /api/market-data/{candles,ingest,coverage,jobs,      ││
-│  │                               funding-rates,open-interest}       ││
+│  │                               funding-rates,open-interest,       ││
+│  │                               liquidations,long-short-ratios}    ││
 │  │             /api/strategies/:id/{bars,backtests,paper/start}     ││
 │  └─────────────────────────────────────────────────────────────────┘│
 │  ┌───────────────┐ ┌─────────────────┐ ┌──────────────────────────┐ │
 │  │ lib/strategy  │ │ lib/backtest    │ │ lib/market-data          │ │
-│  │ validator     │ │ backtest.ts     │ │ providers/{ccxt,base}    │ │
-│  │ graphTypes    │ │ data-loader.ts  │ │ ingestion/{historical,   │ │
-│  │ engine/*      │ │                 │ │  funding-rate,oi,quality}│ │
-│  └───────────────┘ └─────────────────┘ │ storage/timescale.repo  │ │
+│  │ validator     │ │ backtest.ts     │ │ providers/{ccxt,base,    │ │
+│  │ graphTypes    │ │ data-loader.ts  │ │          coinglass}      │ │
+│  │ engine/*      │ │                 │ │ ingestion/{historical,   │ │
+│  └───────────────┘ └─────────────────┘ │  funding-rate,oi,       │ │
+│                                        │  liquidation,long-short, │ │
+│                                        │  quality}                │ │
+│                                        │ storage/timescale.repo   │ │
 │                                        └──────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────┘
           │                                         │
@@ -39,6 +43,8 @@ QuantBlocks is a full-stack Next.js application. Frontend and API routes run in 
 │  Strategy, BacktestRun,  │      │  candles hypertable              │
 │  Trade, PaperSession,    │      │  funding_rates hypertable        │
 │  PaperTrade, IngestionJob│      │  open_interest hypertable        │
+│                          │      │  liquidations hypertable         │
+│                          │      │  long_short_ratios hypertable    │
 └──────────────────────────┘      └──────────────────────────────────┘
 ```
 
@@ -52,7 +58,7 @@ QuantBlocks is a full-stack Next.js application. Frontend and API routes run in 
 | BacktestPanel | `components/strategy/BacktestPanel.tsx` | Run backtest, metrics, chart, data source badge |
 | PaperTradingPanel | `components/strategy/PaperTradingPanel.tsx` | Start/stop/reset, poll session+trades, chart; Real Bars toggle + Replay From date |
 | TwoPaneChart | `components/strategy/TwoPaneChart.tsx` | Candlestick/line + equity, markers, streaming |
-| MarketDataPage | `app/market-data/page.tsx` | Coverage dashboard: candles, funding rates, OI, jobs |
+| MarketDataPage | `app/market-data/page.tsx` | Coverage dashboard: candles, funding rates, OI, liquidations, long/short ratios, jobs |
 | nodeTypes | `components/strategy/nodeTypes/` | React Flow node components per graph type |
 
 ## Backend / API Modules
@@ -80,6 +86,13 @@ CCXT (Binance / Bybit / OKX USDT-perp)         Hyperliquid REST
           ├── fetchFundingRates()                        ├── fetchFundingRates()
           └── fetchOpenInterest()                        └── fetchOpenInterest() → []
 
+CoinGlass REST (public v2 API)                  ← standalone, not a MarketDataProvider
+    └── CoinGlassProvider  (requires COINGLASS_API_KEY)
+          ├── fetchLiquidations(symbol, timeframe) → Liquidation[]
+          └── fetchLongShortRatios(symbol, timeframe) → LongShortRatio[]
+          TF mapping: { "1h": 0, "4h": 1, "1d": 3 }  (timeType integer)
+          Rate limit: ~30 req/min on free tier
+
 Registry (providers/registry.ts)
   exchange === 'hyperliquid' → NativeHyperliquidProvider
   otherwise                 → CCXTProvider
@@ -92,6 +105,8 @@ HistoricalDataIngestionService (candles)
 
 FundingRateIngestionService  → TimescaleRepository.insertFundingRates()
 OpenInterestIngestionService → TimescaleRepository.insertOpenInterest()
+LiquidationIngestionService  → TimescaleRepository.insertLiquidations()    (ON CONFLICT DO NOTHING)
+LongShortRatioIngestionService → TimescaleRepository.insertLongShortRatios() (ON CONFLICT DO NOTHING)
 
 WebSocket live ingestion (ws-ingest.job.ts)
   Binance USDT-M kline stream (native Node.js WebSocket)
@@ -100,7 +115,8 @@ WebSocket live ingestion (ws-ingest.job.ts)
                 │
                 ▼
         TimescaleDB hypertables:
-          candles, funding_rates, open_interest
+          candles, funding_rates, open_interest,
+          liquidations, long_short_ratios
 
 BacktestDataLoader.load()
     └── TimescaleRepository.queryCandles()
@@ -133,6 +149,8 @@ Issues are logged as warnings but do **not** block ingestion. Aggregated `Qualit
 - **candles** (TimescaleDB): exchange, symbol, timeframe, open_time → OHLCV.
 - **funding_rates** (TimescaleDB): exchange, symbol, funding_time, funding_rate, mark_price.
 - **open_interest** (TimescaleDB): exchange, symbol, timeframe, ts, open_interest, open_interest_value.
+- **liquidations** (TimescaleDB): ts, symbol, timeframe, source, buy_liq_usd, sell_liq_usd. (CoinGlass global bars)
+- **long_short_ratios** (TimescaleDB): ts, symbol, timeframe, source, long_ratio, short_ratio, long_short_ratio. (CoinGlass account ratios)
 
 ## Strategy Graph Flow
 
@@ -150,10 +168,13 @@ Issues are logged as warnings but do **not** block ingestion. Aggregated `Qualit
 | Engine logic | `lib/strategy/engine/*`, `lib/backtest/backtest.ts` |
 | Validation | `lib/strategy/validator.ts`, `lib/strategy/graphTypes.ts` |
 | Market data fetch | `lib/market-data/providers/ccxt.provider.ts` |
+| CoinGlass data fetch | `lib/market-data/providers/coinglass.provider.ts` |
 | Data quality | `lib/market-data/ingestion/quality-checker.ts` |
 | Candle ingestion | `lib/market-data/ingestion/historical-service.ts` |
 | Funding rate ingestion | `lib/market-data/ingestion/funding-rate-service.ts` |
 | OI ingestion | `lib/market-data/ingestion/open-interest-service.ts` |
+| Liquidation ingestion | `lib/market-data/ingestion/liquidation-service.ts` |
+| Long/short ratio ingestion | `lib/market-data/ingestion/long-short-service.ts` |
 | TimescaleDB access | `lib/market-data/storage/timescale.repo.ts` |
 | Backtest data loading | `lib/backtest/data-loader.ts` |
 

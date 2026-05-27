@@ -17,7 +17,12 @@
  *     timeframe?:  string;   // default '1h'
  *     days?:       number;   // default 90
  *     dataType?:   string;   // 'candle' (default) | 'funding_rate' | 'open_interest'
+ *                            //   | 'liquidation' | 'long_short'
  *   }
+ *
+ * For CoinGlass data types (liquidation, long_short):
+ *   - symbol is treated as a base ticker ('BTC') or CCXT unified (auto-stripped)
+ *   - COINGLASS_API_KEY must be configured; returns 503 otherwise
  *
  * Returns: { jobId, rowsInserted, gapsFilled, durationMs }
  */
@@ -27,7 +32,15 @@ import { prisma } from "@/lib/prisma";
 import { HistoricalDataIngestionService } from "@/lib/market-data/ingestion/historical-service";
 import { FundingRateIngestionService } from "@/lib/market-data/ingestion/funding-rate-service";
 import { OpenInterestIngestionService } from "@/lib/market-data/ingestion/open-interest-service";
-import { resolveInstrument, isTimeframe } from "@/lib/market-data/types";
+import { LiquidationIngestionService } from "@/lib/market-data/ingestion/liquidation-service";
+import { LongShortRatioIngestionService } from "@/lib/market-data/ingestion/long-short-service";
+import { CoinGlassProvider } from "@/lib/market-data/providers/coinglass.provider";
+import {
+  resolveInstrument,
+  isTimeframe,
+  isCGTimeframe,
+  toCoinGlassSymbol,
+} from "@/lib/market-data/types";
 import type { Exchange, Timeframe } from "@/lib/market-data/types";
 
 export async function POST(req: NextRequest) {
@@ -77,11 +90,31 @@ export async function POST(req: NextRequest) {
   const days = Math.min(daysRaw, 365);
   const dataType = (body.dataType as string) ?? "candle";
 
-  if (!["candle", "funding_rate", "open_interest"].includes(dataType)) {
+  if (!["candle", "funding_rate", "open_interest", "liquidation", "long_short"].includes(dataType)) {
     return NextResponse.json(
-      { error: `Invalid dataType "${dataType}". Must be candle | funding_rate | open_interest` },
+      {
+        error: `Invalid dataType "${dataType}". Must be candle | funding_rate | open_interest | liquidation | long_short`,
+      },
       { status: 400 },
     );
+  }
+
+  // CoinGlass types: validate timeframe before creating any job record
+  if (dataType === "liquidation" || dataType === "long_short") {
+    if (!isCGTimeframe(timeframe)) {
+      return NextResponse.json(
+        {
+          error: `CoinGlass only supports timeframes: 1h | 4h | 1d. Got "${timeframe}"`,
+        },
+        { status: 400 },
+      );
+    }
+    if (!CoinGlassProvider.isConfigured()) {
+      return NextResponse.json(
+        { error: "COINGLASS_API_KEY is not configured on this server" },
+        { status: 503 },
+      );
+    }
   }
 
   const endTime = new Date();
@@ -113,6 +146,14 @@ export async function POST(req: NextRequest) {
     } else if (dataType === "open_interest") {
       const service = new OpenInterestIngestionService();
       result = await service.ingest({ exchange, symbol, timeframe, startTime, endTime });
+    } else if (dataType === "liquidation") {
+      const cgSymbol = toCoinGlassSymbol(symbol);
+      const service = new LiquidationIngestionService();
+      result = await service.ingest({ symbol: cgSymbol, timeframe, startTime, endTime });
+    } else if (dataType === "long_short") {
+      const cgSymbol = toCoinGlassSymbol(symbol);
+      const service = new LongShortRatioIngestionService();
+      result = await service.ingest({ symbol: cgSymbol, timeframe, startTime, endTime });
     } else {
       const service = new HistoricalDataIngestionService();
       result = await service.ingest({ exchange, symbol, timeframe, startTime, endTime });

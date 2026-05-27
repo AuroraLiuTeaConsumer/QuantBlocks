@@ -26,6 +26,10 @@
 | POST | `/api/market-data/funding-rates` | Trigger funding rate ingestion |
 | GET | `/api/market-data/open-interest` | Query open interest snapshots |
 | POST | `/api/market-data/open-interest` | Trigger open interest ingestion |
+| GET | `/api/market-data/liquidations` | Query stored CoinGlass liquidation bars |
+| POST | `/api/market-data/liquidations` | Trigger liquidation ingestion (503 if no key) |
+| GET | `/api/market-data/long-short-ratios` | Query stored CoinGlass L/S account ratios |
+| POST | `/api/market-data/long-short-ratios` | Trigger long/short ratio ingestion (503 if no key) |
 | POST | `/api/ai/translateStrategy` | **Stub** — returns RSI graph |
 
 ## API Shapes
@@ -51,8 +55,12 @@
   "days": 90
 }
 ```
-`dataType` values: `candle` (default) | `funding_rate` | `open_interest`  
-**Response**: `{ jobId, rowsInserted, gapsFilled, durationMs }`
+`dataType` values: `candle` (default) | `funding_rate` | `open_interest` | `liquidation` | `long_short`  
+**Response**: `{ jobId, rowsInserted, gapsFilled, durationMs }`  
+**400** if `dataType` is `liquidation` or `long_short` and `timeframe` is not one of `1h | 4h | 1d` (CoinGlass only supports these three).  
+**503** if `dataType` is `liquidation` or `long_short` and `COINGLASS_API_KEY` is not set.
+
+Both the 400 and 503 are returned **before** an `IngestionJob` record is created, so the job table never contains a record with an unsupported timeframe.
 
 ### GET `/api/market-data/coverage`
 
@@ -75,6 +83,30 @@
 
 **Query**: same as funding-rates, plus `timeframe?` (default `1h`)  
 **Response**: `OpenInterest[]`
+
+### GET `/api/market-data/liquidations`
+
+**Query**: `symbol?`, `timeframe?` (one of `1h` | `4h` | `1d`), `from?`, `to?`, `limit?`  
+**Response**: `Liquidation[]` — `{ ts, symbol, timeframe, source, buy_liq_usd, sell_liq_usd }`
+
+### POST `/api/market-data/liquidations`
+
+Triggers `LiquidationIngestionService.ingest(spec)` for the given symbol + timeframe.  
+**Request**: `{ symbol: string, timeframe: "1h" | "4h" | "1d" }`  
+**Response**: `{ rowsInserted }` on success  
+**503** if `COINGLASS_API_KEY` is not set.
+
+### GET `/api/market-data/long-short-ratios`
+
+**Query**: `symbol?`, `timeframe?` (one of `1h` | `4h` | `1d`), `from?`, `to?`, `limit?`  
+**Response**: `LongShortRatio[]` — `{ ts, symbol, timeframe, source, long_ratio, short_ratio, long_short_ratio }`
+
+### POST `/api/market-data/long-short-ratios`
+
+Triggers `LongShortRatioIngestionService.ingest(spec)` for the given symbol + timeframe.  
+**Request**: `{ symbol: string, timeframe: "1h" | "4h" | "1d" }`  
+**Response**: `{ rowsInserted }` on success  
+**503** if `COINGLASS_API_KEY` is not set.
 
 ## Prisma Models Involved
 
@@ -129,14 +161,21 @@ GET `/api/paper/:sessionId` (when `useRealBars=true`):
 
 ## Ingestion Flow (all data types)
 
-All three ingestion services share the same pattern:
+All ingestion services share the same pattern:
 1. POST `/api/market-data/ingest` (or CLI `npm run ingest -- --dataType <type>`)
 2. Create `IngestionJob` (status=running)
-3. Dispatch to `HistoricalDataIngestionService` / `FundingRateIngestionService` / `OpenInterestIngestionService`
-4. Service fetches from CCXT with rate limiting and retry; inserts with `ON CONFLICT DO NOTHING`
+3. Dispatch to the relevant service:
+   - `candle` → `HistoricalDataIngestionService` (CCXT, gap detection, rate limiting)
+   - `funding_rate` → `FundingRateIngestionService` (CCXT)
+   - `open_interest` → `OpenInterestIngestionService` (CCXT)
+   - `liquidation` → `LiquidationIngestionService` (CoinGlass; 400 if timeframe ∉ {1h,4h,1d}; 503 if no API key)
+   - `long_short` → `LongShortRatioIngestionService` (CoinGlass; 400 if timeframe ∉ {1h,4h,1d}; 503 if no API key)
+4. Service fetches full history and inserts with `ON CONFLICT DO NOTHING`
 5. Update `IngestionJob` (status=completed, rowsInserted, meta)
 
 For candles only: `QualityChecker` runs on each page before insert, accumulates `QualityReport`.
+
+CoinGlass services fetch the full available history in a single call (no cursor paging) and filter to `[startTime, endTime)` before insert.
 
 ## Instrument Resolution
 

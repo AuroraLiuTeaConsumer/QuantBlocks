@@ -10,6 +10,10 @@ import type {
   FundingRateQuery,
   OpenInterest,
   OpenInterestQuery,
+  Liquidation,
+  LiquidationQuery,
+  LongShortRatio,
+  LongShortRatioQuery,
 } from "../types";
 
 // ─── Internal row shapes from pg ─────────────────────────────────────────────
@@ -46,6 +50,25 @@ interface OpenInterestRow {
   open_interest_value: number | null;
 }
 
+interface LiquidationRow {
+  ts: Date;
+  symbol: string;
+  timeframe: string;
+  source: string;
+  buy_liq_usd: number;
+  sell_liq_usd: number;
+}
+
+interface LongShortRatioRow {
+  ts: Date;
+  symbol: string;
+  timeframe: string;
+  source: string;
+  long_ratio: number;
+  short_ratio: number;
+  long_short_ratio: number;
+}
+
 // ─── Coverage summary types ───────────────────────────────────────────────────
 
 export interface CandleCoverageSeries {
@@ -69,6 +92,24 @@ export interface OpenInterestCoverageSeries {
   exchange: string;
   symbol: string;
   timeframe: string;
+  count: number;
+  oldest: Date;
+  newest: Date;
+}
+
+export interface LiquidationCoverageSeries {
+  symbol: string;
+  timeframe: string;
+  source: string;
+  count: number;
+  oldest: Date;
+  newest: Date;
+}
+
+export interface LongShortRatioCoverageSeries {
+  symbol: string;
+  timeframe: string;
+  source: string;
   count: number;
   oldest: Date;
   newest: Date;
@@ -461,6 +502,204 @@ export class TimescaleRepository {
       newest: r.newest instanceof Date ? r.newest : new Date(r.newest),
     }));
   }
+  // ── Liquidation Writes ────────────────────────────────────────────────────
+
+  async insertLiquidations(rows: Liquidation[]): Promise<number> {
+    if (rows.length === 0) return 0;
+
+    const values: unknown[] = [];
+    const placeholders: string[] = [];
+    let p = 1;
+
+    for (const r of rows) {
+      placeholders.push(`($${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`);
+      values.push(r.ts, r.symbol, r.timeframe, r.source, r.buyLiqUsd, r.sellLiqUsd);
+    }
+
+    const sql = `
+      INSERT INTO liquidations (ts, symbol, timeframe, source, buy_liq_usd, sell_liq_usd)
+      VALUES ${placeholders.join(",")}
+      ON CONFLICT DO NOTHING
+    `;
+
+    const client = await this.pool.connect();
+    try {
+      const result = await client.query(sql, values);
+      return result.rowCount ?? 0;
+    } finally {
+      client.release();
+    }
+  }
+
+  // ── Liquidation Reads ─────────────────────────────────────────────────────
+
+  async queryLiquidations(query: LiquidationQuery): Promise<Liquidation[]> {
+    const { symbol, timeframe, startTime, endTime, limit } = query;
+    const params: unknown[] = [symbol, timeframe, startTime, endTime];
+
+    let sql = `
+      SELECT ts, symbol, timeframe, source, buy_liq_usd, sell_liq_usd
+      FROM   liquidations
+      WHERE  symbol    = $1
+        AND  timeframe = $2
+        AND  ts        >= $3
+        AND  ts        <  $4
+      ORDER  BY ts ASC
+    `;
+
+    if (limit != null) {
+      params.push(limit);
+      sql += ` LIMIT $${params.length}`;
+    }
+
+    const result = await this.pool.query<LiquidationRow>(sql, params);
+    return result.rows.map(rowToLiquidation);
+  }
+
+  async getLatestLiquidationTime(
+    symbol: string,
+    timeframe: string,
+  ): Promise<Date | null> {
+    const result = await this.pool.query<{ ts: Date }>(
+      `SELECT ts FROM liquidations
+       WHERE symbol = $1 AND timeframe = $2
+       ORDER BY ts DESC LIMIT 1`,
+      [symbol, timeframe],
+    );
+    const raw = result.rows[0]?.ts;
+    if (!raw) return null;
+    return raw instanceof Date ? raw : new Date(raw);
+  }
+
+  // ── Long/Short Ratio Writes ───────────────────────────────────────────────
+
+  async insertLongShortRatios(rows: LongShortRatio[]): Promise<number> {
+    if (rows.length === 0) return 0;
+
+    const values: unknown[] = [];
+    const placeholders: string[] = [];
+    let p = 1;
+
+    for (const r of rows) {
+      placeholders.push(`($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`);
+      values.push(r.ts, r.symbol, r.timeframe, r.source, r.longRatio, r.shortRatio, r.longShortRatio);
+    }
+
+    const sql = `
+      INSERT INTO long_short_ratios
+        (ts, symbol, timeframe, source, long_ratio, short_ratio, long_short_ratio)
+      VALUES ${placeholders.join(",")}
+      ON CONFLICT DO NOTHING
+    `;
+
+    const client = await this.pool.connect();
+    try {
+      const result = await client.query(sql, values);
+      return result.rowCount ?? 0;
+    } finally {
+      client.release();
+    }
+  }
+
+  // ── Long/Short Ratio Reads ────────────────────────────────────────────────
+
+  async queryLongShortRatios(query: LongShortRatioQuery): Promise<LongShortRatio[]> {
+    const { symbol, timeframe, startTime, endTime, limit } = query;
+    const params: unknown[] = [symbol, timeframe, startTime, endTime];
+
+    let sql = `
+      SELECT ts, symbol, timeframe, source, long_ratio, short_ratio, long_short_ratio
+      FROM   long_short_ratios
+      WHERE  symbol    = $1
+        AND  timeframe = $2
+        AND  ts        >= $3
+        AND  ts        <  $4
+      ORDER  BY ts ASC
+    `;
+
+    if (limit != null) {
+      params.push(limit);
+      sql += ` LIMIT $${params.length}`;
+    }
+
+    const result = await this.pool.query<LongShortRatioRow>(sql, params);
+    return result.rows.map(rowToLongShortRatio);
+  }
+
+  async getLatestLongShortRatioTime(
+    symbol: string,
+    timeframe: string,
+  ): Promise<Date | null> {
+    const result = await this.pool.query<{ ts: Date }>(
+      `SELECT ts FROM long_short_ratios
+       WHERE symbol = $1 AND timeframe = $2
+       ORDER BY ts DESC LIMIT 1`,
+      [symbol, timeframe],
+    );
+    const raw = result.rows[0]?.ts;
+    if (!raw) return null;
+    return raw instanceof Date ? raw : new Date(raw);
+  }
+
+  // ── Liquidation Coverage ──────────────────────────────────────────────────
+
+  async getLiquidationCoverage(): Promise<LiquidationCoverageSeries[]> {
+    const result = await this.pool.query<{
+      symbol: string;
+      timeframe: string;
+      source: string;
+      count: string;
+      oldest: Date;
+      newest: Date;
+    }>(
+      `SELECT symbol, timeframe, source,
+              COUNT(*) AS count,
+              MIN(ts)  AS oldest,
+              MAX(ts)  AS newest
+       FROM   liquidations
+       GROUP  BY symbol, timeframe, source
+       ORDER  BY symbol, timeframe`,
+    );
+
+    return result.rows.map((r) => ({
+      symbol: r.symbol,
+      timeframe: r.timeframe,
+      source: r.source,
+      count: parseInt(r.count, 10),
+      oldest: r.oldest instanceof Date ? r.oldest : new Date(r.oldest),
+      newest: r.newest instanceof Date ? r.newest : new Date(r.newest),
+    }));
+  }
+
+  // ── Long/Short Ratio Coverage ─────────────────────────────────────────────
+
+  async getLongShortRatioCoverage(): Promise<LongShortRatioCoverageSeries[]> {
+    const result = await this.pool.query<{
+      symbol: string;
+      timeframe: string;
+      source: string;
+      count: string;
+      oldest: Date;
+      newest: Date;
+    }>(
+      `SELECT symbol, timeframe, source,
+              COUNT(*) AS count,
+              MIN(ts)  AS oldest,
+              MAX(ts)  AS newest
+       FROM   long_short_ratios
+       GROUP  BY symbol, timeframe, source
+       ORDER  BY symbol, timeframe`,
+    );
+
+    return result.rows.map((r) => ({
+      symbol: r.symbol,
+      timeframe: r.timeframe,
+      source: r.source,
+      count: parseInt(r.count, 10),
+      oldest: r.oldest instanceof Date ? r.oldest : new Date(r.oldest),
+      newest: r.newest instanceof Date ? r.newest : new Date(r.newest),
+    }));
+  }
 }
 
 // ─── Module-level singleton ───────────────────────────────────────────────────
@@ -515,5 +754,28 @@ function rowToOpenInterest(row: OpenInterestRow): OpenInterest {
     ts: row.ts instanceof Date ? row.ts : new Date(row.ts),
     openInterest: row.open_interest,
     openInterestValue: row.open_interest_value,
+  };
+}
+
+function rowToLiquidation(row: LiquidationRow): Liquidation {
+  return {
+    ts: row.ts instanceof Date ? row.ts : new Date(row.ts),
+    symbol: row.symbol,
+    timeframe: row.timeframe,
+    source: row.source,
+    buyLiqUsd: row.buy_liq_usd,
+    sellLiqUsd: row.sell_liq_usd,
+  };
+}
+
+function rowToLongShortRatio(row: LongShortRatioRow): LongShortRatio {
+  return {
+    ts: row.ts instanceof Date ? row.ts : new Date(row.ts),
+    symbol: row.symbol,
+    timeframe: row.timeframe,
+    source: row.source,
+    longRatio: row.long_ratio,
+    shortRatio: row.short_ratio,
+    longShortRatio: row.long_short_ratio,
   };
 }

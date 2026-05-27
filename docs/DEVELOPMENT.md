@@ -45,13 +45,15 @@ Market data dashboard: [http://localhost:3000/market-data](http://localhost:3000
 | Var | Required | Notes |
 |-----|----------|-------|
 | DATABASE_URL | Yes | PostgreSQL connection string — used by both Prisma and TimescaleDB raw pool |
+| COINGLASS_API_KEY | No* | Required only for CoinGlass data types (`liquidation`, `long_short`). Without it, those ingest routes return 503 and the CLI prints an error and exits. All other ingestion works without it. |
 
 Example:
 ```
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/quantblocks"
+COINGLASS_API_KEY="your_coinglass_api_key_here"
 ```
 
-No other env vars are currently required (Binance public OHLCV is unauthenticated; CCXT requires no API keys for historical data).
+CCXT-based data (candles, funding rates, open interest) requires no API keys for historical data.
 
 ## Scripts
 
@@ -68,6 +70,8 @@ No other env vars are currently required (Binance public OHLCV is unauthenticate
 | Ingest (custom) | `npm run ingest -- --exchange bybit --symbol "BTC/USDT:USDT" --timeframe 1h --days 180` | |
 | Ingest funding rates | `npm run ingest -- --dataType funding_rate --days 365` | |
 | Ingest open interest | `npm run ingest -- --dataType open_interest --timeframe 1h` | |
+| Ingest liquidations | `npm run ingest -- --dataType liquidation --symbol BTC --timeframe 1h` | Requires `COINGLASS_API_KEY` |
+| Ingest long/short ratios | `npm run ingest -- --dataType long_short --symbol ETH --timeframe 4h` | Requires `COINGLASS_API_KEY` |
 | WS live ingestion | `npm run ws:ingest` | Binance futures kline stream; auto-reconnects |
 | WS custom | `npm run ws:ingest -- --symbols BTCUSDT,ETHUSDT --timeframe 1m` | |
 
@@ -83,7 +87,7 @@ No other env vars are currently required (Binance public OHLCV is unauthenticate
 | Track | Tool | Schema | When to run |
 |-------|------|---------|-------------|
 | App tables | Prisma (`prisma/schema.prisma`) | Strategy, BacktestRun, Trade, PaperSession, PaperTrade, IngestionJob | `npx prisma migrate dev` |
-| TimescaleDB hypertables | Raw SQL (`db/migrations/timescale/*.sql`) | candles, funding_rates, open_interest | `npm run setup:timescale` (once) |
+| TimescaleDB hypertables | Raw SQL (`db/migrations/timescale/*.sql`) | candles, funding_rates, open_interest, liquidations (004), long_short_ratios (005) | `npm run setup:timescale` (once) |
 
 `npm run setup:timescale` runs all `db/migrations/timescale/*.sql` files in sorted order (001, 002, 003…). It is safe to re-run — every statement uses `IF NOT EXISTS`.
 
@@ -114,6 +118,7 @@ After adding a new Prisma model: always run `npx prisma generate` to update the 
 | `prisma.ingestionJob` not found | Prisma client not regenerated | `npx prisma generate` |
 | `@rollup/rollup-darwin-x64` missing | Platform binary not installed | `npm install` |
 | OI ingestion fails | Exchange doesn't support `fetchOpenInterestHistory` | Known limitation — only Binance futures and some Bybit/OKX endpoints support it |
+| CoinGlass ingest 400 "only supports timeframes" | Passed `--timeframe 5m` (or similar) with `--dataType liquidation` or `long_short` | CoinGlass only accepts `1h`, `4h`, `1d`. Use one of those. |
 | CCXT rate limit errors | Network throttling from exchange | Rate limiter set to 70% of RPM; wait and retry |
 | Paper session not advancing | No one polling | Keep Paper tab visible |
 

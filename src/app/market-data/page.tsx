@@ -12,6 +12,8 @@ import type {
   CandleCoverageSeries,
   FundingRateCoverageSeries,
   OpenInterestCoverageSeries,
+  LiquidationCoverageSeries,
+  LongShortRatioCoverageSeries,
 } from "@/lib/market-data/storage/timescale.repo";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -178,21 +180,104 @@ function OpenInterestTable({ rows }: { rows: OpenInterestCoverageSeries[] }) {
   );
 }
 
+function LiquidationTable({ rows }: { rows: LiquidationCoverageSeries[] }) {
+  if (rows.length === 0) {
+    return (
+      <EmptyState message="No liquidation data ingested yet. Run: npm run ingest -- --dataType liquidation --symbol BTC" />
+    );
+  }
+  return (
+    <div className="overflow-x-auto rounded-lg border border-gray-800">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-gray-800 bg-gray-900/50">
+            <th className="px-4 py-2 text-left text-gray-400 font-medium">Symbol</th>
+            <th className="px-4 py-2 text-left text-gray-400 font-medium">Timeframe</th>
+            <th className="px-4 py-2 text-left text-gray-400 font-medium">Source</th>
+            <th className="px-4 py-2 text-right text-gray-400 font-medium">Bars</th>
+            <th className="px-4 py-2 text-left text-gray-400 font-medium">Oldest</th>
+            <th className="px-4 py-2 text-left text-gray-400 font-medium">Newest</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr
+              key={i}
+              className="border-b border-gray-800/50 hover:bg-gray-900/30 transition-colors"
+            >
+              <td className="px-4 py-2 text-white font-mono text-xs">{r.symbol}</td>
+              <td className="px-4 py-2">
+                <span className="px-1.5 py-0.5 rounded bg-gray-800 text-gray-300 text-xs font-mono">
+                  {r.timeframe}
+                </span>
+              </td>
+              <td className="px-4 py-2 text-gray-400 font-mono text-xs">{r.source}</td>
+              <td className="px-4 py-2 text-right text-white font-mono">{fmtN(r.count)}</td>
+              <td className="px-4 py-2 text-gray-400 font-mono text-xs">{fmt(r.oldest)}</td>
+              <td className="px-4 py-2 text-gray-400 font-mono text-xs">{fmt(r.newest)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function LongShortRatioTable({ rows }: { rows: LongShortRatioCoverageSeries[] }) {
+  if (rows.length === 0) {
+    return (
+      <EmptyState message="No long/short ratio data ingested yet. Run: npm run ingest -- --dataType long_short --symbol BTC" />
+    );
+  }
+  return (
+    <div className="overflow-x-auto rounded-lg border border-gray-800">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-gray-800 bg-gray-900/50">
+            <th className="px-4 py-2 text-left text-gray-400 font-medium">Symbol</th>
+            <th className="px-4 py-2 text-left text-gray-400 font-medium">Timeframe</th>
+            <th className="px-4 py-2 text-left text-gray-400 font-medium">Source</th>
+            <th className="px-4 py-2 text-right text-gray-400 font-medium">Rows</th>
+            <th className="px-4 py-2 text-left text-gray-400 font-medium">Oldest</th>
+            <th className="px-4 py-2 text-left text-gray-400 font-medium">Newest</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr
+              key={i}
+              className="border-b border-gray-800/50 hover:bg-gray-900/30 transition-colors"
+            >
+              <td className="px-4 py-2 text-white font-mono text-xs">{r.symbol}</td>
+              <td className="px-4 py-2">
+                <span className="px-1.5 py-0.5 rounded bg-gray-800 text-gray-300 text-xs font-mono">
+                  {r.timeframe}
+                </span>
+              </td>
+              <td className="px-4 py-2 text-gray-400 font-mono text-xs">{r.source}</td>
+              <td className="px-4 py-2 text-right text-white font-mono">{fmtN(r.count)}</td>
+              <td className="px-4 py-2 text-gray-400 font-mono text-xs">{fmt(r.oldest)}</td>
+              <td className="px-4 py-2 text-gray-400 font-mono text-xs">{fmt(r.newest)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default async function MarketDataPage() {
   // Fetch coverage and jobs concurrently
-  const [candleCoverage, fundingCoverage, oiCoverage, recentJobs] =
+  const repo = getTimescaleRepo();
+  const [candleCoverage, fundingCoverage, oiCoverage, liqCoverage, lsCoverage, recentJobs] =
     await Promise.all([
-      getTimescaleRepo()
-        .getCandleCoverage()
-        .catch(() => [] as CandleCoverageSeries[]),
-      getTimescaleRepo()
-        .getFundingRateCoverage()
-        .catch(() => [] as FundingRateCoverageSeries[]),
-      getTimescaleRepo()
-        .getOpenInterestCoverage()
-        .catch(() => [] as OpenInterestCoverageSeries[]),
+      repo.getCandleCoverage().catch(() => [] as CandleCoverageSeries[]),
+      repo.getFundingRateCoverage().catch(() => [] as FundingRateCoverageSeries[]),
+      repo.getOpenInterestCoverage().catch(() => [] as OpenInterestCoverageSeries[]),
+      repo.getLiquidationCoverage().catch(() => [] as LiquidationCoverageSeries[]),
+      repo.getLongShortRatioCoverage().catch(() => [] as LongShortRatioCoverageSeries[]),
       prisma.ingestionJob
         .findMany({ orderBy: { createdAt: "desc" }, take: 20 })
         .catch(() => []),
@@ -201,7 +286,9 @@ export default async function MarketDataPage() {
   const totalRows =
     candleCoverage.reduce((s, r) => s + r.barCount, 0) +
     fundingCoverage.reduce((s, r) => s + r.count, 0) +
-    oiCoverage.reduce((s, r) => s + r.count, 0);
+    oiCoverage.reduce((s, r) => s + r.count, 0) +
+    liqCoverage.reduce((s, r) => s + r.count, 0) +
+    lsCoverage.reduce((s, r) => s + r.count, 0);
 
   return (
     <main className="min-h-screen bg-gray-950 text-gray-100">
@@ -236,6 +323,18 @@ export default async function MarketDataPage() {
         <section>
           <SectionHeader title="Open Interest" count={oiCoverage.length} />
           <OpenInterestTable rows={oiCoverage} />
+        </section>
+
+        {/* ── Liquidations Coverage ─────────────────────────────────────── */}
+        <section>
+          <SectionHeader title="Liquidations (CoinGlass)" count={liqCoverage.length} />
+          <LiquidationTable rows={liqCoverage} />
+        </section>
+
+        {/* ── Long/Short Ratios Coverage ────────────────────────────────── */}
+        <section>
+          <SectionHeader title="Long/Short Ratios (CoinGlass)" count={lsCoverage.length} />
+          <LongShortRatioTable rows={lsCoverage} />
         </section>
 
         {/* ── Recent Jobs ───────────────────────────────────────────────── */}
@@ -321,6 +420,21 @@ export default async function MarketDataPage() {
             </div>
             <div className="text-green-400">
               npm run ingest -- --dataType open_interest --timeframe 1h
+            </div>
+            <div className="mt-3">
+              <span className="text-gray-600"># Liquidations — requires COINGLASS_API_KEY</span>
+            </div>
+            <div className="text-green-400">
+              npm run ingest -- --dataType liquidation --symbol BTC --timeframe 1h
+            </div>
+            <div className="text-green-400">
+              npm run ingest -- --dataType liquidation --symbol ETH --timeframe 4h --days 180
+            </div>
+            <div className="mt-3">
+              <span className="text-gray-600"># Long/short ratios — requires COINGLASS_API_KEY</span>
+            </div>
+            <div className="text-green-400">
+              npm run ingest -- --dataType long_short --symbol BTC --timeframe 1d
             </div>
           </div>
         </section>

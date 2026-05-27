@@ -78,6 +78,73 @@ export interface OpenInterest {
   openInterestValue: number | null; // quote currency value
 }
 
+// ─── CoinGlass Derivatives Types ─────────────────────────────────────────────
+
+/**
+ * CoinGlass timeframes supported by the derivatives endpoints (liquidations,
+ * long/short ratios). '12h' exists on CoinGlass but is omitted here because
+ * it is not in the main TIMEFRAMES tuple.
+ */
+export const CG_TIMEFRAMES = ["1h", "4h", "1d"] as const;
+export type CGTimeframe = (typeof CG_TIMEFRAMES)[number];
+
+export function isCGTimeframe(s: string): s is CGTimeframe {
+  return CG_TIMEFRAMES.includes(s as CGTimeframe);
+}
+
+/**
+ * Derive the CoinGlass symbol (base ticker) from a QuantBlocks / CCXT symbol.
+ * 'BTC/USDT:USDT' → 'BTC', 'BTC' → 'BTC'.
+ */
+export function toCoinGlassSymbol(symbol: string): string {
+  return symbol.split("/")[0].toUpperCase();
+}
+
+/**
+ * Global liquidation bar from CoinGlass (aggregated across all exchanges).
+ * buyLiqUsd  = long positions liquidated (USD)
+ * sellLiqUsd = short positions liquidated (USD)
+ */
+export interface Liquidation {
+  ts: Date;
+  symbol: string;    // base ticker: 'BTC', 'ETH', …
+  timeframe: string; // '1h', '4h', '1d'
+  source: string;    // 'coinglass'
+  buyLiqUsd: number;
+  sellLiqUsd: number;
+}
+
+export interface LiquidationQuery {
+  symbol: string;
+  timeframe: string;
+  startTime: Date;
+  endTime: Date;
+  limit?: number;
+}
+
+/**
+ * Global long/short account ratio from CoinGlass.
+ * longRatio + shortRatio ≈ 1.0
+ * longShortRatio = longRatio / shortRatio
+ */
+export interface LongShortRatio {
+  ts: Date;
+  symbol: string;
+  timeframe: string;
+  source: string;
+  longRatio: number;
+  shortRatio: number;
+  longShortRatio: number;
+}
+
+export interface LongShortRatioQuery {
+  symbol: string;
+  timeframe: string;
+  startTime: Date;
+  endTime: Date;
+  limit?: number;
+}
+
 // ─── Query Types ─────────────────────────────────────────────────────────────
 
 export interface CandleQuery {

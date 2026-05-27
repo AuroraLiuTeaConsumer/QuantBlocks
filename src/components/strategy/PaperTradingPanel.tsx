@@ -44,6 +44,15 @@ type PaperTrade = {
   pnl: number;
 };
 
+/** Parse JSON from a fetch Response without throwing on empty/non-JSON bodies. */
+async function safeJson(res: Response): Promise<Record<string, unknown>> {
+  try {
+    return (await res.json()) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
 function toUTCSec(date: string | Date): number {
   return Math.floor(new Date(date).getTime() / 1000);
 }
@@ -244,14 +253,14 @@ export function PaperTradingPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!mountedRef.current) return;
       if (!res.ok) {
-        setError(data.error ?? "Failed to start");
+        setError((data.error as string | undefined) ?? "Failed to start");
         setLoading(false);
         return;
       }
-      const snap = data as SessionSnapshot;
+      const snap = data as unknown as SessionSnapshot;
       setSession(snap);
       setTrades([]);
       setLoading(false);
@@ -270,13 +279,13 @@ export function PaperTradingPanel({
     setError(null);
     try {
       const res = await fetch(`/api/paper/${session.id}/stop`, { method: "POST" });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!mountedRef.current) return;
       if (!res.ok) {
-        setError(data.error ?? "Failed to stop");
+        setError((data.error as string | undefined) ?? "Failed to stop");
         return;
       }
-      setSession(data as SessionSnapshot);
+      setSession(data as unknown as SessionSnapshot);
       stopPolling();
       pollTrades(session.id);
     } catch (err) {
@@ -291,13 +300,13 @@ export function PaperTradingPanel({
     setError(null);
     try {
       const res = await fetch(`/api/paper/${session.id}/reset`, { method: "POST" });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!mountedRef.current) return;
       if (!res.ok) {
-        setError(data.error ?? "Failed to reset");
+        setError((data.error as string | undefined) ?? "Failed to reset");
         return;
       }
-      setSession(data as SessionSnapshot);
+      setSession(data as unknown as SessionSnapshot);
       setTrades([]);
       stopPolling();
       resetChart();

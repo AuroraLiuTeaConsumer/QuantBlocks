@@ -15,6 +15,9 @@
 | 20 | Native Hyperliquid adapter | ✅ `NativeHyperliquidProvider` — REST candleSnapshot + fundingHistory endpoints |
 | 21 | WebSocket live candle ingestion | ✅ `ws-ingest.job.ts` — Binance USDT-M kline stream, native Node.js WebSocket, auto-reconnect |
 | 22 | Real-bar paper trading | ✅ `useRealBars` toggle on PaperSession; poll route replays TimescaleDB candles via `barCursor` |
+| 24 | CoinGlass liquidations data | ✅ `CoinGlassProvider` + `LiquidationIngestionService` + `liquidations` hypertable + GET/POST API routes + CLI + coverage dashboard section |
+| 25 | Aggregated long/short ratios across exchanges | ✅ `LongShortRatioIngestionService` + `long_short_ratios` hypertable + GET/POST API routes + CLI + coverage dashboard section |
+| 27 | CoinGlass timeframe validation gap | ✅ `isCGTimeframe()` check added before job record creation in both API route and CLI; unsupported timeframes return 400/exit(1) instead of silently falling back to `1h` |
 
 ## Active / In Progress
 
@@ -44,12 +47,10 @@
 | 39 | Paper trading driven by live Redis stream (background worker, no poll needed) |
 | 40 | Session replay from stored stream |
 
-## Phase 4 — Derivatives Data
+## Phase 4 — Derivatives Data (remaining)
 
 | # | Item |
 |---|------|
-| 24 | CoinGlass liquidations data |
-| 25 | Aggregated long/short ratios across exchanges |
 | 26 | CoinGlass OI aggregation (cross-exchange) |
 
 ## Longer-Term Quant Features

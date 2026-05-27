@@ -11,9 +11,11 @@ PaperTrade    → PaperSession
 IngestionJob  (standalone, tracks all data backfill jobs)
 
 TimescaleDB (raw SQL, not Prisma):
-  candles          (hypertable, partitioned by open_time, 7-day chunks)
-  funding_rates    (hypertable, partitioned by funding_time, 1-day chunks)
-  open_interest    (hypertable, partitioned by ts, 7-day chunks)
+  candles            (hypertable, partitioned by open_time, 7-day chunks)
+  funding_rates      (hypertable, partitioned by funding_time, 1-day chunks)
+  open_interest      (hypertable, partitioned by ts, 7-day chunks)
+  liquidations       (hypertable, partitioned by ts, 7-day chunks) — CoinGlass
+  long_short_ratios  (hypertable, partitioned by ts, 7-day chunks) — CoinGlass
 ```
 
 ## Prisma Models
@@ -178,6 +180,39 @@ All managed via `db/migrations/timescale/*.sql` (not Prisma). Run `npm run setup
 
 **Compression**: after 30 days, segmented by `(exchange, symbol, timeframe)`
 
+### liquidations
+
+Source: CoinGlass public v2 API (global liquidation bars). Applied via migration 004.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| ts | TIMESTAMPTZ | Partition key (7-day chunks) |
+| symbol | TEXT | Base ticker, e.g. "BTC" |
+| timeframe | TEXT | One of: `1h`, `4h`, `1d` |
+| source | TEXT | e.g. "coinglass" |
+| buy_liq_usd | DOUBLE PRECISION | Long liquidations in USD |
+| sell_liq_usd | DOUBLE PRECISION | Short liquidations in USD |
+
+**Primary key / unique index**: `(ts, symbol, timeframe, source)` → `ON CONFLICT DO NOTHING`  
+**Compression**: after 30 days, segmented by `(symbol, timeframe, source)`
+
+### long_short_ratios
+
+Source: CoinGlass public v2 API (global long/short account ratios). Applied via migration 005.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| ts | TIMESTAMPTZ | Partition key (7-day chunks) |
+| symbol | TEXT | Base ticker, e.g. "BTC" |
+| timeframe | TEXT | One of: `1h`, `4h`, `1d` |
+| source | TEXT | e.g. "coinglass" |
+| long_ratio | DOUBLE PRECISION | Fraction of accounts long (0–1) |
+| short_ratio | DOUBLE PRECISION | Fraction of accounts short (0–1) |
+| long_short_ratio | DOUBLE PRECISION | long_ratio / short_ratio |
+
+**Primary key / unique index**: `(ts, symbol, timeframe, source)` → `ON CONFLICT DO NOTHING`  
+**No compression configured** (7-day chunks only)
+
 ## Instrument Resolution
 
 `lib/market-data/types.ts` — `INSTRUMENT_MAP`:
@@ -227,6 +262,8 @@ Stored as `nodes` and `edges` JSON. Zod schemas in `lib/strategy/graphTypes.ts`:
 | candles | ✅ TimescaleDB | — |
 | funding_rates | ✅ TimescaleDB | — |
 | open_interest | ✅ TimescaleDB | — |
+| liquidations | ✅ TimescaleDB | — |
+| long_short_ratios | ✅ TimescaleDB | — |
 | EngineState | ✅ DB (PaperSession.engineState) | In-memory during step |
 | Draft graph | — | React state |
 | Poll state | — | React component state |

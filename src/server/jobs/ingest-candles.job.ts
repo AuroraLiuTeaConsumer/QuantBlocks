@@ -10,6 +10,8 @@
  *   npm run ingest -- --dataType funding_rate --days 365
  *   npm run ingest -- --dataType open_interest --timeframe 1h
  *   npm run ingest -- --exchange bybit --symbol "BTC/USDT:USDT" --dataType candle
+ *   npm run ingest -- --dataType liquidation --symbol BTC --timeframe 4h
+ *   npm run ingest -- --dataType long_short --symbol ETH --timeframe 1d
  *
  * ─── Prerequisites ───────────────────────────────────────────────────────────
  *   1. docker-compose up -d
@@ -42,7 +44,14 @@ for (const f of [".env.local", ".env"]) {
 import { HistoricalDataIngestionService } from "../../lib/market-data/ingestion/historical-service";
 import { FundingRateIngestionService } from "../../lib/market-data/ingestion/funding-rate-service";
 import { OpenInterestIngestionService } from "../../lib/market-data/ingestion/open-interest-service";
+import { LiquidationIngestionService } from "../../lib/market-data/ingestion/liquidation-service";
+import { LongShortRatioIngestionService } from "../../lib/market-data/ingestion/long-short-service";
+import { CoinGlassProvider } from "../../lib/market-data/providers/coinglass.provider";
 import { prisma } from "../../lib/prisma";
+import {
+  isCGTimeframe,
+  toCoinGlassSymbol,
+} from "../../lib/market-data/types";
 import type { Exchange, Timeframe } from "../../lib/market-data/types";
 
 // ─── Arg parsing ─────────────────────────────────────────────────────────────
@@ -70,6 +79,16 @@ function parseArgs() {
 
 async function main() {
   const { exchange, symbol, timeframe, startTime, endTime, days, dataType } = parseArgs();
+
+  // Validate CoinGlass timeframe before creating any job record
+  if (dataType === "liquidation" || dataType === "long_short") {
+    if (!isCGTimeframe(timeframe)) {
+      console.error(
+        `❌  CoinGlass only supports timeframes: 1h | 4h | 1d. Got "${timeframe}"`,
+      );
+      process.exit(1);
+    }
+  }
 
   console.log("═══════════════════════════════════════════════════════════");
   console.log("  QuantBlocks — Historical Data Ingestion");
@@ -118,6 +137,28 @@ async function main() {
       const service = new OpenInterestIngestionService();
       result = await service.ingest(
         { exchange, symbol, timeframe, startTime, endTime },
+        (msg) => console.log(`  ${msg}`),
+      );
+    } else if (dataType === "liquidation") {
+      if (!CoinGlassProvider.isConfigured()) {
+        console.error("❌  COINGLASS_API_KEY is not set. Cannot ingest liquidation data.");
+        process.exit(1);
+      }
+      const cgSymbol = toCoinGlassSymbol(symbol);
+      const service = new LiquidationIngestionService();
+      result = await service.ingest(
+        { symbol: cgSymbol, timeframe, startTime, endTime },
+        (msg) => console.log(`  ${msg}`),
+      );
+    } else if (dataType === "long_short") {
+      if (!CoinGlassProvider.isConfigured()) {
+        console.error("❌  COINGLASS_API_KEY is not set. Cannot ingest long/short data.");
+        process.exit(1);
+      }
+      const cgSymbol = toCoinGlassSymbol(symbol);
+      const service = new LongShortRatioIngestionService();
+      result = await service.ingest(
+        { symbol: cgSymbol, timeframe, startTime, endTime },
         (msg) => console.log(`  ${msg}`),
       );
     } else {

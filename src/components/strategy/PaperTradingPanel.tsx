@@ -126,6 +126,7 @@ export function PaperTradingPanel({
   const chartRef = useRef<TwoPaneChartHandle>(null);
   const lastEquityTimeRef = useRef(0);
   const seenTradeIdsRef = useRef(new Set<string>());
+  const seenExitIdsRef = useRef(new Set<string>());
   const allMarkersRef = useRef<ChartMarker[]>([]);
 
   useEffect(() => {
@@ -140,7 +141,10 @@ export function PaperTradingPanel({
   const appendFromSnapshot = useCallback((snap: SessionSnapshot) => {
     const chart = chartRef.current;
     if (!chart) return;
-    const time = toUTCSec(snap.updatedAt);
+    // Real-bar replay: use the actual historical candle timestamp from barCursor
+    // so the x-axis shows the replayed date, not today's wall-clock time.
+    // Synthetic mode has no barCursor so we fall back to wall-clock.
+    const time = snap.barCursor ? toUTCSec(snap.barCursor) : toUTCSec(snap.updatedAt);
     if (time > lastEquityTimeRef.current) {
       chart.appendEquity({ time, value: snap.equity });
       chart.appendPrice({ time, value: snap.lastPrice });
@@ -153,18 +157,24 @@ export function PaperTradingPanel({
     if (!chart) return;
     let changed = false;
     for (const t of tradeList) {
-      if (seenTradeIdsRef.current.has(t.id)) continue;
-      seenTradeIdsRef.current.add(t.id);
-      changed = true;
       const isLong = t.side === "long";
-      allMarkersRef.current.push({
-        time: toUTCSec(t.entryTime),
-        position: isLong ? "belowBar" : "aboveBar",
-        shape: isLong ? "arrowUp" : "arrowDown",
-        color: isLong ? "#089981" : "#f23645",
-        text: isLong ? "Long" : "Short",
-      });
-      if (t.exitTime) {
+      // Entry marker — add once per trade id
+      if (!seenTradeIdsRef.current.has(t.id)) {
+        seenTradeIdsRef.current.add(t.id);
+        changed = true;
+        allMarkersRef.current.push({
+          time: toUTCSec(t.entryTime),
+          position: isLong ? "belowBar" : "aboveBar",
+          shape: isLong ? "arrowUp" : "arrowDown",
+          color: isLong ? "#089981" : "#f23645",
+          text: isLong ? "Long" : "Short",
+        });
+      }
+      // Exit marker — added separately so a trade first seen as open
+      // gets its exit marker on the next poll when exitTime is populated
+      if (t.exitTime && !seenExitIdsRef.current.has(t.id)) {
+        seenExitIdsRef.current.add(t.id);
+        changed = true;
         allMarkersRef.current.push({
           time: toUTCSec(t.exitTime),
           position: isLong ? "aboveBar" : "belowBar",
@@ -181,6 +191,7 @@ export function PaperTradingPanel({
     chartRef.current?.reset();
     lastEquityTimeRef.current = 0;
     seenTradeIdsRef.current.clear();
+    seenExitIdsRef.current.clear();
     allMarkersRef.current = [];
   }, []);
 

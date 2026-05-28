@@ -15,10 +15,10 @@ import type { Timeframe } from "@/lib/market-data/types";
  * This is a placeholder until real market data feeds are integrated.
  */
 function simulateBar(lastPrice: number, timeSec: number): Bar {
-  const change = (Math.random() - 0.5) * 2 * lastPrice * 0.005; // ±0.5%
+  const change = (Math.random() - 0.5) * 2 * lastPrice * 0.002; // ±0.2%
   const close = Math.round((lastPrice + change) * 100) / 100;
-  const high = Math.max(lastPrice, close) + Math.random() * lastPrice * 0.002;
-  const low = Math.min(lastPrice, close) - Math.random() * lastPrice * 0.002;
+  const high = Math.max(lastPrice, close) + Math.random() * lastPrice * 0.0008;
+  const low = Math.min(lastPrice, close) - Math.random() * lastPrice * 0.0008;
   return {
     timeSec,
     open: lastPrice,
@@ -94,7 +94,7 @@ export async function GET(
           symbol: mapping.symbol,
           timeframe: session.timeframe as Timeframe,
           startTime: new Date(cursor.getTime() + 1), // strictly after cursor
-          endTime: new Date(Date.now() + barIntervalMs),
+          endTime: new Date(),
           limit: 5, // at most 5 bars per poll; keeps replay at a reasonable pace
         });
         realBars = candles.map((c) => ({
@@ -115,9 +115,11 @@ export async function GET(
     }
   }
 
-  const barsToSim = session.useRealBars
-    ? realBars.length
-    : Math.min(Math.floor((now.getTime() - lastUpdate.getTime()) / barIntervalMs), 10);
+  // Synthetic mode: always advance exactly 1 bar per poll so the session
+  // progresses at a steady 1 bar/s regardless of the strategy timeframe.
+  // Elapsed-time math would produce 0 bars for any timeframe longer than
+  // the 1-second poll interval, stalling the session permanently.
+  const barsToSim = session.useRealBars ? realBars.length : 1;
 
   if (barsToSim === 0) {
     return NextResponse.json(toSnapshot(session as unknown as SessionRow));
@@ -241,20 +243,39 @@ export async function GET(
     return NextResponse.json(toSnapshot(latest as unknown as SessionRow));
   }
 
-  // We won the lock: persist trades
-  if (tradesToCreate.length > 0 || prevPollCloses.length > 0) {
+  // We won the lock: persist trades.
+  // Resolve the specific ID of the pre-existing open trade (if any) so the
+  // close can be applied with a targeted update rather than the broad
+  // {sessionId, exitTime: null} predicate. The engine's no-pyramiding invariant
+  // guarantees prevPollCloses.length ≤ 1, but an ID-based update is correct
+  // regardless of that assumption and removes the latent data-loss risk if the
+  // invariant ever changes.
+  let prevOpenTradeId: string | null = null;
+  if (prevPollCloses.length > 0) {
+    const open = await prisma.paperTrade.findFirst({
+      where: { sessionId, exitTime: null },
+      select: { id: true },
+    });
+    prevOpenTradeId = open?.id ?? null;
+  }
+
+  if (tradesToCreate.length > 0 || (prevPollCloses.length > 0 && prevOpenTradeId != null)) {
     await prisma.$transaction([
-      // New records (opens, or same-batch open+close)
+      // Close the prev-poll position by its specific ID.
+      // prevPollCloses always has ≤ 1 entry; the explicit [0] index makes that
+      // assumption visible rather than hiding it inside a .map().
+      ...(prevPollCloses.length > 0 && prevOpenTradeId != null
+        ? [prisma.paperTrade.update({
+            where: { id: prevOpenTradeId },
+            data: {
+              exitTime: prevPollCloses[0].exitTime,
+              exitPrice: prevPollCloses[0].exitPrice,
+              pnl: prevPollCloses[0].pnl,
+            },
+          })]
+        : []),
+      // Create new records (same-batch opens, or fully-closed open+close pairs).
       ...tradesToCreate.map((t) => prisma.paperTrade.create({ data: t })),
-      // Close the open record from a previous poll — update by sessionId + exitTime IS NULL.
-      // updateMany is safe here: a single-instrument engine can hold at most one open
-      // position at a time, so at most one row matches the predicate per close event.
-      ...prevPollCloses.map((c) =>
-        prisma.paperTrade.updateMany({
-          where: { sessionId, exitTime: null },
-          data: { exitTime: c.exitTime, exitPrice: c.exitPrice, pnl: c.pnl },
-        }),
-      ),
     ]);
   }
 

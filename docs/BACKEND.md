@@ -14,6 +14,7 @@
 | POST | `/api/strategies/[id]/paper/start` | Create/resume paper session |
 | GET | `/api/backtests/[runId]` | Get backtest run |
 | GET | `/api/backtests/[runId]/trades` | Get run trades |
+| GET | `/api/backtests/[runId]/export` | Download backtest as CSV (METRICS + TRADES + EQUITY_CURVE) |
 | GET | `/api/paper/[sessionId]` | Poll session; advances engine if running |
 | POST | `/api/paper/[sessionId]/stop` | Stop session |
 | POST | `/api/paper/[sessionId]/reset` | Reset session to idle |
@@ -36,8 +37,42 @@
 
 ### POST `/api/strategies/[id]/backtests`
 
-**Request**: `{ initialCapital?, feeBps?, startTime?, endTime? }` (all optional)  
+**Request**: `{ initialCapital?, feeBps?, startTime?, endTime? }` (all optional; defaults: `initialCapital=10000`, `feeBps=5`, `startTime=now−90d`, `endTime=now`)  
 **Response**: BacktestRun (201), `log.dataSource` and `log.dataSourceLabel` included
+
+### GET `/api/backtests/[runId]/export`
+
+**Query params**: none  
+**Response**: CSV file attachment — `Content-Disposition: attachment; filename="backtest-<runId[:8]>.csv"`
+
+The CSV has a comment header block followed by three labeled sections:
+
+```
+# QuantBlocks Backtest Export
+# Run ID: <runId>
+# Period start: <startTime>
+# Period end: <endTime>
+# Data source: <dataSourceLabel>
+
+# METRICS
+Metric,Value
+Total Return %,...
+Net PnL,...
+Max Drawdown %,...
+Win Rate,...
+...
+
+# TRADES
+Side,Entry Time,Entry Price,Exit Time,Exit Price,Qty,PnL,Reason Open,Reason Close
+...
+
+# EQUITY_CURVE
+Time,Equity
+...
+```
+
+**404** — run not found  
+**400** — run found but status is not `completed`
 
 ### GET `/api/strategies/[id]/bars`
 
@@ -130,8 +165,10 @@ Triggers `LongShortRatioIngestionService.ingest(spec)` for the given symbol + ti
 2. `resolveInstrument(strategy.instrument)` → exchange + CCXT symbol
 3. `BacktestDataLoader.load(...)` — queries TimescaleDB, checks ≥80% coverage
 4. On success: real candles. On `InsufficientDataError` or DB error: `SAMPLE_CANDLES`, log warning
-5. `runBacktest(graph, candles, config)` — synchronous, shared engine
-6. Persist trades, update run (status, metrics, log including dataSource/dataSourceLabel)
+5. **Funding rate load** (best-effort, real-data path only): `repo.queryFundingRates(exchange, symbol, from, to)` — loaded and passed as `fundingRates` into `runBacktest`; silently skipped if DB unavailable; `fundingRatesLoaded` count stored in `run.log`
+6. `runBacktest(graph, candles, config)` — synchronous; per-bar `barFundingCost` deducted from equity; cumulative funding cost forwarded to `computeMetrics`
+7. `computeMetrics` (in `lib/backtest/metrics.ts`) produces: totalReturnPct, netPnl, maxDrawdownPct, winRate, numberOfTrades, avgWin, avgLoss, profitFactor, sharpe, sortino, calmar, benchmarkReturnPct, fundingCostPaid
+8. Persist trades, update run (status, metrics, log including dataSource/dataSourceLabel, fundingRatesLoaded)
 
 ## Paper Trading Flow
 
@@ -140,7 +177,9 @@ Triggers `LongShortRatioIngestionService.ingest(spec)` for the given symbol + ti
 POST `/api/strategies/:id/paper/start`  
 **Body** (all optional): `{ useRealBars?: boolean, replayFrom?: ISO date string }`
 
-Creates PaperSession with `useRealBars` and `barCursor` (= `replayFrom` or null).
+Creates PaperSession with `useRealBars` and `barCursor` (= `replayFrom` date, or null). Also seeds `lastPrice` from the most recent TimescaleDB candle for the strategy's instrument (falls back to 100 if unavailable).
+
+When `barCursor` is null, the poll route defaults to `session.startedAt − 90 days` as the query start, matching the default ingestion window.
 
 ### Poll (synthetic mode — default)
 
@@ -157,7 +196,7 @@ GET `/api/paper/:sessionId` (when `useRealBars=true`):
 ### Stop / Reset
 
 - **Stop**: POST `/api/paper/:sessionId/stop` → force-close, status=stopped
-- **Reset**: POST `/api/paper/:sessionId/reset` → delete trades, clear engineState + barCursor, status=idle
+- **Reset**: POST `/api/paper/:sessionId/reset` → delete trades, clear engineState + barCursor, status=idle; re-seeds `lastPrice` from latest TimescaleDB candle (falls back to 100)
 
 ## Ingestion Flow (all data types)
 

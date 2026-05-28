@@ -158,7 +158,7 @@ export function BacktestPanel({
   disableRun?: boolean;
 }) {
   const [status, setStatus] = useState<RunStatus>("idle");
-  const [, setRunId] = useState<string | null>(null);
+  const [runId, setRunId] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<Record<string, unknown> | null>(null);
   const [equityCurve, setEquityCurve] = useState<EquityPoint[]>([]);
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -369,11 +369,15 @@ export function BacktestPanel({
   };
 
   const totalReturn = metrics?.totalReturnPct as number | undefined;
+  const netPnl = metrics?.netPnl as number | undefined;
   const sharpe = metrics?.sharpe as number | undefined;
+  const sortino = metrics?.sortino as number | undefined;
+  const calmar = metrics?.calmar as number | undefined;
   const maxDD = metrics?.maxDrawdownPct as number | undefined;
   const winRate = metrics?.winRate as number | undefined;
-  const netPnl = metrics?.netPnl as number | undefined;
   const numTrades = metrics?.numberOfTrades as number | undefined;
+  const benchmarkReturn = metrics?.benchmarkReturnPct as number | undefined;
+  const fundingCost = metrics?.fundingCostPaid as number | undefined;
 
   return (
     <div className="flex shrink-0 flex-col">
@@ -424,26 +428,40 @@ export function BacktestPanel({
             </span>
           )}
         </div>
-        <button
-          type="button"
-          onClick={handleRunBacktest}
-          disabled={status === "running" || disableRun}
-          className="inline-flex items-center gap-1.5 rounded-md bg-profit px-3 py-1.5 text-xs font-semibold text-white shadow-[0_1px_4px_rgba(8,153,129,0.25)] transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {status === "running" ? (
-            <>
-              <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-              Running…
-            </>
-          ) : (
-            <>
+        <div className="flex items-center gap-2">
+          {status === "success" && runId && (
+            <a
+              href={`/api/backtests/${runId}/export`}
+              download
+              className="inline-flex items-center gap-1.5 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-surface-alt"
+            >
               <svg width="10" height="10" viewBox="0 0 11 11" fill="currentColor">
-                <polygon points="2,1 10,5.5 2,10" />
+                <path d="M5.5 1v6M2 7l3.5 3 3.5-3M1 10h9" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round"/>
               </svg>
-              Run Backtest
-            </>
+              Export CSV
+            </a>
           )}
-        </button>
+          <button
+            type="button"
+            onClick={handleRunBacktest}
+            disabled={status === "running" || disableRun}
+            className="inline-flex items-center gap-1.5 rounded-md bg-profit px-3 py-1.5 text-xs font-semibold text-white shadow-[0_1px_4px_rgba(8,153,129,0.25)] transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {status === "running" ? (
+              <>
+                <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                Running…
+              </>
+            ) : (
+              <>
+                <svg width="10" height="10" viewBox="0 0 11 11" fill="currentColor">
+                  <polygon points="2,1 10,5.5 2,10" />
+                </svg>
+                Run Backtest
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Error */}
@@ -481,7 +499,8 @@ export function BacktestPanel({
 
       {/* Metrics */}
       {status === "success" && metrics != null && (
-        <div className="grid grid-cols-3 gap-2 border-b border-line px-4 py-3 sm:grid-cols-6">
+        <div className="grid grid-cols-3 gap-2 border-b border-line px-4 py-3 sm:grid-cols-5">
+          {/* Row 1 */}
           <MetricCard
             label="Return"
             value={formatPct(totalReturn)}
@@ -497,13 +516,38 @@ export function BacktestPanel({
             value={formatNum(sharpe)}
             positive={typeof sharpe === "number" ? sharpe >= 0 : null}
           />
+          <MetricCard
+            label="Sortino"
+            value={formatNum(sortino)}
+            positive={typeof sortino === "number" ? sortino >= 0 : null}
+          />
+          <MetricCard
+            label="Calmar"
+            value={formatNum(calmar)}
+            positive={typeof calmar === "number" ? calmar >= 0 : null}
+          />
+          {/* Row 2 */}
           <MetricCard label="Max DD" value={formatPct(maxDD)} positive={false} />
           <MetricCard
             label="Win Rate"
-            value={formatPct(winRate)}
-            positive={typeof winRate === "number" ? winRate >= 50 : null}
+            value={formatPct(typeof winRate === "number" ? winRate * 100 : winRate)}
+            positive={typeof winRate === "number" ? winRate >= 0.5 : null}
           />
           <MetricCard label="Trades" value={formatNum(numTrades, 0)} />
+          <MetricCard
+            label="Benchmark"
+            value={formatPct(benchmarkReturn)}
+            positive={typeof benchmarkReturn === "number" ? benchmarkReturn >= 0 : null}
+          />
+          <MetricCard
+            label="Funding"
+            value={
+              typeof fundingCost === "number" && fundingCost !== 0
+                ? `${fundingCost > 0 ? "-" : "+"}${formatNum(Math.abs(fundingCost))}`
+                : "—"
+            }
+            positive={typeof fundingCost === "number" ? fundingCost <= 0 : null}
+          />
         </div>
       )}
 

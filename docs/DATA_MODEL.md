@@ -46,17 +46,22 @@ TimescaleDB (raw SQL, not Prisma):
 | log | Json? | See Log shape below |
 | trades | Trade[] | |
 
-**Metrics shape**:
+**Metrics shape** (13 fields, Phase 5):
 ```ts
 {
-  totalReturnPct: number;
+  totalReturnPct: number;          // percentage scale (e.g. 5.23 = 5.23%)
   netPnl: number;
-  maxDrawdownPct: number;
-  winRate: number;
+  maxDrawdownPct: number;          // percentage scale
+  winRate: number;                 // fraction 0–1 (e.g. 0.75 = 75%)
   numberOfTrades: number;
   avgWin: number;
   avgLoss: number;
-  profitFactor: number;
+  profitFactor: number | null;     // null = no losing trades (unbounded)
+  sharpe: number;                  // annualized Sharpe ratio
+  sortino: number;                 // annualized Sortino ratio
+  calmar: number;                  // annualized return / max drawdown
+  benchmarkReturnPct: number;      // buy-and-hold return, percentage scale
+  fundingCostPaid: number;         // total USD funding fees (positive = paid)
 }
 ```
 

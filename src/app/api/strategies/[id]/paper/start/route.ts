@@ -4,9 +4,12 @@ import { toSnapshot } from "@/lib/paper/engine";
 import type { SessionRow } from "@/lib/paper/engine";
 import { createInitialState } from "@/lib/strategy/engine";
 import type { Prisma } from "@prisma/client";
+import { resolveInstrument, isTimeframe } from "@/lib/market-data/types";
+import type { Timeframe } from "@/lib/market-data/types";
+import { getTimescaleRepo } from "@/lib/market-data/storage/timescale.repo";
 
 const INITIAL_EQUITY = 10_000;
-const INITIAL_PRICE = 100;
+const FALLBACK_PRICE = 100;
 
 export async function POST(
   req: NextRequest,
@@ -36,14 +39,53 @@ export async function POST(
       return NextResponse.json({ error: "Strategy not found" }, { status: 404 });
     }
 
-    // If there's already a running session for this strategy, return it
+    // If there's already a running session for this strategy, either resume
+    // it or reject if the caller's params conflict with its configuration.
     const existing = await prisma.paperSession.findFirst({
       where: { strategyId: id, status: "running" },
       orderBy: { createdAt: "desc" },
     });
 
     if (existing) {
+      const wantsDifferentMode = useRealBars !== existing.useRealBars;
+      const wantsNewReplayDate = barCursor !== null;
+      if (wantsDifferentMode || wantsNewReplayDate) {
+        return NextResponse.json(
+          {
+            error:
+              "A session is already running with different settings. " +
+              "Stop the current session before changing real-bar mode or replay date.",
+            sessionId: existing.id,
+          },
+          { status: 409 },
+        );
+      }
       return NextResponse.json(toSnapshot(existing as unknown as SessionRow));
+    }
+
+    // Seed lastPrice from the most recent closed candle so the initial price
+    // display and synthetic random-walk start at a realistic level.
+    let initialPrice = FALLBACK_PRICE;
+    const mapping = resolveInstrument(strategy.instrument);
+    const tf = isTimeframe(strategy.timeframe) ? strategy.timeframe : null;
+    if (mapping && tf) {
+      try {
+        const repo = getTimescaleRepo();
+        const latestTime = await repo.getLatestOpenTime(mapping.exchange, mapping.symbol, tf as Timeframe);
+        if (latestTime) {
+          const candles = await repo.queryCandles({
+            exchange: mapping.exchange,
+            symbol: mapping.symbol,
+            timeframe: tf as Timeframe,
+            startTime: latestTime,
+            endTime: new Date(latestTime.getTime() + 1),
+            limit: 1,
+          });
+          if (candles.length > 0) initialPrice = candles[0].close;
+        }
+      } catch {
+        // TimescaleDB unavailable — proceed with fallback
+      }
     }
 
     const engineState = createInitialState(INITIAL_EQUITY);
@@ -54,7 +96,7 @@ export async function POST(
         status: "running",
         instrument: strategy.instrument,
         timeframe: strategy.timeframe,
-        lastPrice: INITIAL_PRICE,
+        lastPrice: initialPrice,
         equity: INITIAL_EQUITY,
         realizedPnl: 0,
         unrealizedPnl: 0,

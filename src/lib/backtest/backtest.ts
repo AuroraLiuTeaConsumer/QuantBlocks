@@ -7,6 +7,13 @@ import {
   type Bar,
   type TradeEvent,
 } from "../strategy/engine";
+import { computeMetrics } from "./metrics";
+import type { BacktestMetrics } from "./metrics";
+import { barFundingCost } from "./funding";
+import type { FundingRate } from "../market-data/types";
+
+// Re-export so callers that import BacktestMetrics from here still work.
+export type { BacktestMetrics };
 
 // ---------------------------------------------------------------------------
 // Candle type (OHLC series input for backtests)
@@ -27,8 +34,12 @@ export interface Candle {
 
 export interface BacktestConfig {
   initialCapital: number;
-  feeBps: number; // taker fee in basis points (e.g. 5 = 0.05%)
-  slippageBps: number; // 0 for MVP
+  feeBps: number;          // taker fee in basis points (e.g. 5 = 0.05%)
+  slippageBps: number;     // 0 for MVP
+  /** Funding rate events for the instrument. Applied per-bar when a position is open. */
+  fundingRates?: FundingRate[];
+  /** Duration of one candle in milliseconds — improves Sharpe/Sortino annualization. */
+  timeframeMs?: number;
 }
 
 export const DEFAULT_CONFIG: BacktestConfig = {
@@ -56,16 +67,6 @@ export interface TradeRecord {
 export interface EquityPoint {
   time: string;
   equity: number;
-}
-
-export interface BacktestMetrics {
-  totalReturnPct: number;
-  netPnl: number;
-  maxDrawdownPct: number;
-  winRate: number;
-  numberOfTrades: number;
-  avgWin: number;
-  avgLoss: number;
 }
 
 export interface BacktestResult {
@@ -96,8 +97,13 @@ export function runBacktest(
 
   let lastOpenReason = "";
   let cumulativeFees = 0;
+  let cumulativeFundingCost = 0;
 
-  const reportEquity = () => round(state.equity - cumulativeFees);
+  const reportEquity = () =>
+    round(state.equity - cumulativeFees - cumulativeFundingCost);
+
+  const hasFunding =
+    Array.isArray(config.fundingRates) && config.fundingRates.length > 0;
 
   for (let i = 0; i < candles.length; i++) {
     const candle = candles[i];
@@ -107,6 +113,19 @@ export function runBacktest(
 
     for (const evt of result.events) {
       processEvent(evt, i);
+    }
+
+    // Apply funding payments when a position is open
+    if (hasFunding && state.position) {
+      const barOpenMs = new Date(candle.time).getTime();
+      const barCloseMs = barOpenMs + (config.timeframeMs ?? 3_600_000);
+      cumulativeFundingCost += barFundingCost(
+        config.fundingRates!,
+        state.position,
+        barOpenMs,
+        barCloseMs,
+        candle.close,
+      );
     }
 
     equityCurve.push({ time: candle.time, equity: reportEquity() });
@@ -125,7 +144,14 @@ export function runBacktest(
     }
   }
 
-  const metrics = computeMetrics(trades, config.initialCapital, equityCurve);
+  const metrics = computeMetrics(
+    trades,
+    config.initialCapital,
+    equityCurve,
+    candles,
+    cumulativeFundingCost,
+    config.timeframeMs,
+  );
   return { metrics, equityCurve, trades, debugEvents };
 
   function processEvent(evt: TradeEvent, barIndex: number) {
@@ -226,40 +252,6 @@ function applySlippage(price: number, side: string, slippageBps: number): number
   return side === "long" ? price + slip : price - slip;
 }
 
-function computeMetrics(
-  trades: TradeRecord[],
-  initialCapital: number,
-  equityCurve: EquityPoint[],
-): BacktestMetrics {
-  const closedTrades = trades.filter((t) => t.exitPrice !== null);
-  const wins = closedTrades.filter((t) => t.pnl > 0);
-  const losses = closedTrades.filter((t) => t.pnl <= 0);
-
-  const netPnl = closedTrades.reduce((sum, t) => sum + t.pnl, 0);
-  const totalReturnPct = (netPnl / initialCapital) * 100;
-  const winRate = closedTrades.length > 0 ? wins.length / closedTrades.length : 0;
-  const avgWin = wins.length > 0 ? wins.reduce((s, t) => s + t.pnl, 0) / wins.length : 0;
-  const avgLoss = losses.length > 0 ? losses.reduce((s, t) => s + t.pnl, 0) / losses.length : 0;
-
-  let peak = initialCapital;
-  let maxDD = 0;
-  for (const pt of equityCurve) {
-    if (pt.equity > peak) peak = pt.equity;
-    const dd = peak > 0 ? (peak - pt.equity) / peak : 0;
-    if (dd > maxDD) maxDD = dd;
-  }
-
-  return {
-    totalReturnPct: round(totalReturnPct),
-    netPnl: round(netPnl),
-    maxDrawdownPct: round(maxDD * 100),
-    winRate: round(winRate),
-    numberOfTrades: closedTrades.length,
-    avgWin: round(avgWin),
-    avgLoss: round(avgLoss),
-  };
-}
-
 function round(n: number): number {
-  return Math.round(n * 10000) / 10000;
+  return Math.round(n * 10_000) / 10_000;
 }

@@ -8,8 +8,14 @@ import {
   getBacktestDataLoader,
   InsufficientDataError,
 } from "@/lib/backtest/data-loader";
-import { resolveInstrument, isTimeframe } from "@/lib/market-data/types";
+import {
+  resolveInstrument,
+  isTimeframe,
+  TIMEFRAME_MS,
+} from "@/lib/market-data/types";
+import { getTimescaleRepo } from "@/lib/market-data/storage/timescale.repo";
 import type { Candle as BacktestCandle } from "@/lib/backtest/backtest";
+import type { FundingRate } from "@/lib/market-data/types";
 
 // POST /api/strategies/:id/backtests — run a backtest
 export async function POST(
@@ -58,6 +64,8 @@ export async function POST(
   let candles: BacktestCandle[] = SAMPLE_CANDLES;
   let dataSource: "real" | "sample" = "sample";
   let dataSourceLabel = "Sample (synthetic 60-bar dataset)";
+  let fundingRates: FundingRate[] = [];
+  let timeframeMs: number | undefined;
 
   const mapping = resolveInstrument(strategy.instrument);
   const tf = isTimeframe(strategy.timeframe) ? strategy.timeframe : null;
@@ -65,6 +73,7 @@ export async function POST(
   if (mapping && tf) {
     const endTime = bodyEndTime ?? new Date();
     const startTime = bodyStartTime ?? new Date(endTime.getTime() - 90 * 24 * 3600 * 1_000);
+    timeframeMs = TIMEFRAME_MS[tf];
 
     try {
       const loader = getBacktestDataLoader();
@@ -81,6 +90,19 @@ export async function POST(
       dataSourceLabel =
         `${mapping.exchange} ${mapping.symbol} ${tf} ` +
         `(${dataset.candleCount} bars, ${dataset.coveragePct.toFixed(1)}% coverage)`;
+
+      // Load funding rates for the same window (best-effort — silently skip if unavailable)
+      try {
+        const repo = getTimescaleRepo();
+        fundingRates = await repo.queryFundingRates({
+          exchange: mapping.exchange,
+          symbol: mapping.symbol,
+          startTime,
+          endTime,
+        });
+      } catch {
+        // Funding rates are optional; proceed without them
+      }
     } catch (err) {
       if (err instanceof InsufficientDataError) {
         // Not enough real data — fall back gracefully with a clear log message
@@ -119,7 +141,7 @@ export async function POST(
 
   try {
     // Run backtest (synchronous — fine for MVP dataset sizes)
-    const result = runBacktest(graph, candles, config);
+    const result = runBacktest(graph, candles, { ...config, fundingRates, timeframeMs });
 
     // Persist trades
     for (const t of result.trades) {
@@ -152,6 +174,7 @@ export async function POST(
             // Data source metadata — consumed by BacktestPanel
             dataSource,
             dataSourceLabel,
+            fundingRatesLoaded: fundingRates.length,
           }),
         ),
       },

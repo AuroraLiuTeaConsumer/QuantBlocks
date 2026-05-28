@@ -22,7 +22,7 @@ When `useRealBars=true` the poll route:
 4. Updates `PaperSession.barCursor` to the last processed candle's `open_time`.
 5. If no new candles are available (replay is caught up), returns the current snapshot without advancing.
 
-The `barCursor` starts at `replayFrom` (if provided) or at epoch 0 (→ earliest available candle in DB).
+The `barCursor` starts at `replayFrom` (if provided at start time) or defaults to 90 days before session creation when null. The 90-day lookback matches the default ingestion window and avoids replaying from the beginning of the entire DB history.
 
 ## Session Lifecycle
 
@@ -34,9 +34,9 @@ The `barCursor` starts at `replayFrom` (if provided) or at epoch 0 (→ earliest
 
 | Action | Endpoint | Behavior |
 |--------|----------|----------|
-| Start | POST `/api/strategies/:id/paper/start` | Create session or return existing running session. Body: `{ useRealBars?: boolean, replayFrom?: ISO string }` |
+| Start | POST `/api/strategies/:id/paper/start` | Create session or return existing running session. Seeds `lastPrice` from the most recent TimescaleDB candle (falls back to 100 if unavailable). Body: `{ useRealBars?: boolean, replayFrom?: ISO string }` |
 | Stop | POST `/api/paper/:sessionId/stop` | Force-close position, set status=stopped |
-| Reset | POST `/api/paper/:sessionId/reset` | Delete PaperTrades, set status=idle, clear engineState + barCursor |
+| Reset | POST `/api/paper/:sessionId/reset` | Delete PaperTrades, set status=idle, clear engineState + barCursor. Re-seeds `lastPrice` from the most recent TimescaleDB candle (falls back to 100) so the next start begins at a realistic price. |
 
 ## Polling and Hydration Model
 

@@ -19,6 +19,7 @@ QuantBlocks is a full-stack Next.js application. Frontend and API routes run in 
 │  Next.js (App Router)                                               │
 │  ┌─────────────────────────────────────────────────────────────────┐│
 │  │ API Routes: /api/strategies, /api/backtests, /api/paper,         ││
+│  │             /api/backtests/:runId/export,                        ││
 │  │             /api/ai/translateStrategy,                           ││
 │  │             /api/market-data/{candles,ingest,coverage,jobs,      ││
 │  │                               funding-rates,open-interest,       ││
@@ -29,9 +30,9 @@ QuantBlocks is a full-stack Next.js application. Frontend and API routes run in 
 │  │ lib/strategy  │ │ lib/backtest    │ │ lib/market-data          │ │
 │  │ validator     │ │ backtest.ts     │ │ providers/{ccxt,base,    │ │
 │  │ graphTypes    │ │ data-loader.ts  │ │          coinglass}      │ │
-│  │ engine/*      │ │                 │ │ ingestion/{historical,   │ │
-│  └───────────────┘ └─────────────────┘ │  funding-rate,oi,       │ │
-│                                        │  liquidation,long-short, │ │
+│  │ engine/*      │ │ metrics.ts      │ │ ingestion/{historical,   │ │
+│  │               │ │ funding.ts      │ │  funding-rate,oi,        │ │
+│  └───────────────┘ └─────────────────┘ │  liquidation,long-short, │ │
 │                                        │  quality}                │ │
 │                                        │ storage/timescale.repo   │ │
 │                                        └──────────────────────────┘ │
@@ -166,6 +167,8 @@ Issues are logged as warnings but do **not** block ingestion. Aggregated `Qualit
 | UI | `components/strategy/*`, `app/market-data/page.tsx` |
 | Route handlers | `app/api/*` |
 | Engine logic | `lib/strategy/engine/*`, `lib/backtest/backtest.ts` |
+| Metrics computation | `lib/backtest/metrics.ts` |
+| Funding cost per bar | `lib/backtest/funding.ts` |
 | Validation | `lib/strategy/validator.ts`, `lib/strategy/graphTypes.ts` |
 | Market data fetch | `lib/market-data/providers/ccxt.provider.ts` |
 | CoinGlass data fetch | `lib/market-data/providers/coinglass.provider.ts` |
@@ -180,9 +183,9 @@ Issues are logged as warnings but do **not** block ingestion. Aggregated `Qualit
 
 ## Current Weak Points / Technical Debt
 
-1. **Paper bars still synthetic**: Paper trading uses random-walk bars. Phase 3 replaces with live Redis stream.
-2. **No background worker**: Paper advances only when a client polls. Multiple tabs risk double-advancement (optimistic lock mitigates).
-3. **Session persistence**: Paper panel state resets on tab switch; session lives in DB.
+1. **Poll-only paper advancement**: Paper trading advances only when a client polls. No background worker — if no tab is open, the session does not advance. Multiple concurrent tabs risk double-advancement (optimistic lock mitigates). Real-bar replay is fully implemented; synthetic mode is still available as a fallback.
+2. **No real-time feed**: Real-bar mode replays historical candles from TimescaleDB; it is not driven by a live stream. Phase 4 would add Redis pub/sub for true live advancement.
+3. **Session persistence**: Paper panel state resets on tab switch; session lives in DB but panel starts fresh on return (no "resume session" UX).
 4. **AI stub**: No real LLM; always same RSI strategy.
 5. **Strategy creation UX**: No "New Strategy" UI — create via API or seed.
 6. **OI availability**: `fetchOpenInterestHistory` is not supported on all CCXT exchanges; service throws and ingestion job records the failure.

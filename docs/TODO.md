@@ -18,6 +18,11 @@
 | 24 | CoinGlass liquidations data | ✅ `CoinGlassProvider` + `LiquidationIngestionService` + `liquidations` hypertable + GET/POST API routes + CLI + coverage dashboard section |
 | 25 | Aggregated long/short ratios across exchanges | ✅ `LongShortRatioIngestionService` + `long_short_ratios` hypertable + GET/POST API routes + CLI + coverage dashboard section |
 | 27 | CoinGlass timeframe validation gap | ✅ `isCGTimeframe()` check added before job record creation in both API route and CLI; unsupported timeframes return 400/exit(1) instead of silently falling back to `1h` |
+| 29 | Metrics: Sharpe, Sortino, Calmar, benchmark vs buy-and-hold | ✅ Phase 5 — `lib/backtest/metrics.ts`; all four added to `BacktestMetrics` and displayed in BacktestPanel (10-card grid) |
+| 32 | Funding rate cost factored into backtest PnL | ✅ Phase 5 — `lib/backtest/funding.ts` `barFundingCost`; deducted per bar from equity; `fundingCostPaid` in metrics; best-effort DB load in backtest route |
+| 35 | Export backtest results (CSV) | ✅ Phase 5 — `GET /api/backtests/:runId/export`; CSV with METRICS, TRADES, EQUITY_CURVE sections; "Export CSV" button in BacktestPanel |
+
+**Phase 5 summary**: extracted `computeMetrics` into `lib/backtest/metrics.ts`; added risk-adjusted ratios (Sharpe, Sortino, Calmar) and benchmark return; added per-bar funding cost via `lib/backtest/funding.ts` with best-effort DB load; added CSV export endpoint; expanded BacktestPanel metrics grid from 6 to 10 cards; no DB/Prisma schema changes required.
 
 ## Active / In Progress
 
@@ -59,10 +64,8 @@
 |---|------|
 | 27 | Walk-forward / robustness testing |
 | 28 | Order simulation (limit orders, partial fills) |
-| 29 | Metrics: Sharpe, Sortino, Calmar, benchmark vs buy-and-hold |
 | 30 | Multi-instrument strategy support |
 | 31 | Async backtest runs (queue + poll for large datasets) |
-| 32 | Funding rate cost factored into backtest PnL |
 
 ## Nice-to-Have
 
@@ -70,7 +73,6 @@
 |---|------|
 | 33 | Dark/light theme toggle |
 | 34 | Strategy templates / examples |
-| 35 | Export backtest results (CSV) |
 | 36 | Keyboard shortcuts for canvas |
 | 37 | Mobile/responsive improvements |
 | 38 | Coverage dashboard auto-refresh |

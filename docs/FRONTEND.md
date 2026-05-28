@@ -24,7 +24,7 @@
 
 ## Chart Integration
 
-- **Backtest**: `TwoPaneChart` with `bars`, `equity`, `trades`; mode=`backtest`. Bars from `/api/strategies/:id/bars` (synthetic).
+- **Backtest**: `TwoPaneChart` with `bars`, `equity`, `trades`; mode=`backtest`. Bars from `/api/strategies/:id/bars` — real candles from TimescaleDB when available, synthetic fallback otherwise.
 - **Paper**: `TwoPaneChart` with `streaming`, mode=`paper`. No bars initially; price line + equity streamed via `appendEquity` / `appendPrice` on poll. Markers updated from trades.
 - **Lightweight Charts v5**: CandlestickSeries, LineSeries, createSeriesMarkers; crosshair sync between panes.
 

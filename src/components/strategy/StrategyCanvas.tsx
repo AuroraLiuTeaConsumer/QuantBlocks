@@ -160,7 +160,9 @@ function FlowCanvas({
 
   const onNodesChangeWithDirty = useCallback(
     (changes: Parameters<typeof onNodesChange>[0]) => {
-      hasUserChangedRef.current = true;
+      if (changes.some((c) => c.type !== "select" && c.type !== "dimensions")) {
+        hasUserChangedRef.current = true;
+      }
       onNodesChange(changes);
     },
     [onNodesChange]

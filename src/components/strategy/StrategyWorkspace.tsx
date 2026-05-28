@@ -227,7 +227,6 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
               onSaveSuccess={() => {
                 setSaveError(null);
                 prevGraphRef.current = null;
-                setAppliedGraph(null);
                 setHasPendingApply(false);
                 setSaveStatus("saved");
                 setTimeout(() => setSaveStatus("idle"), 2500);
@@ -315,24 +314,25 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
               </button>
             </div>
 
-            {/* Tab content */}
-            {!drawerCollapsed && (
-              <div className="min-h-0 flex-1 overflow-auto">
-                {bottomTab === "backtest" && (
-                  <BacktestPanel
-                    strategyId={strategy.id}
-                    strategyTimeframe={strategy.timeframe}
-                    disableRun={isCanvasSaving || hasPendingApply}
-                  />
-                )}
-                {bottomTab === "paper" && (
-                  <PaperTradingPanel
-                    strategyId={strategy.id}
-                    disableRun={isCanvasSaving || hasPendingApply}
-                  />
-                )}
+            {/* Tab content — kept mounted to preserve session state across collapse/tab switch */}
+            <div
+              className="min-h-0 flex-1 overflow-auto"
+              style={{ display: drawerCollapsed ? "none" : undefined }}
+            >
+              <div className="h-full" style={bottomTab !== "backtest" ? { display: "none" } : undefined}>
+                <BacktestPanel
+                  strategyId={strategy.id}
+                  strategyTimeframe={strategy.timeframe}
+                  disableRun={isCanvasSaving || hasPendingApply}
+                />
               </div>
-            )}
+              <div className="h-full" style={bottomTab !== "paper" ? { display: "none" } : undefined}>
+                <PaperTradingPanel
+                  strategyId={strategy.id}
+                  disableRun={isCanvasSaving || hasPendingApply}
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>

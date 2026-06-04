@@ -213,7 +213,11 @@ export function PaperTradingPanel({
         if (!res.ok || !mountedRef.current) return;
         const data = (await res.json()) as SessionSnapshot;
         if (!mountedRef.current) return;
-        setSession(data);
+        // Use a functional update so a stale "running" response that arrives
+        // after a "stopped" response cannot revert the UI back to running.
+        setSession((prev) =>
+          prev?.status !== "running" && data.status === "running" ? prev : data
+        );
         if (data.status === "running") appendFromSnapshot(data);
         if (data.status !== "running") stopPolling();
       } catch {

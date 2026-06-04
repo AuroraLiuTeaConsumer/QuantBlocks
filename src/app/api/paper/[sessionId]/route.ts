@@ -104,6 +104,7 @@ export async function GET(
     // ── Fetch the next batch of real candles ────────────────────────────────
     let realBars: RealBar[] = [];
     let newBarCursor: Date | null = cur.barCursor ?? null;
+    let dbError = false;
 
     try {
       const repo = getTimescaleRepo();
@@ -126,11 +127,25 @@ export async function GET(
         close: c.close,
       }));
     } catch {
-      // TimescaleDB unavailable — nothing to replay this poll
+      dbError = true; // TimescaleDB unavailable — nothing to replay this poll
     }
 
     if (realBars.length === 0) {
-      return NextResponse.json(toSnapshot(cur as unknown as SessionRow));
+      if (dbError) {
+        // DB temporarily unavailable — keep session running, retry next poll
+        return NextResponse.json(toSnapshot(cur as unknown as SessionRow));
+      }
+      // Genuinely caught up to the most recent candle — auto-stop so the UI
+      // transitions to "stopped" and the user can reset/replay.
+      await prisma.paperSession.updateMany({
+        where: { id: sessionId, status: "running" },
+        data: { status: "stopped" },
+      });
+      const stopped = await prisma.paperSession.findUnique({ where: { id: sessionId } });
+      if (!stopped) {
+        return NextResponse.json({ error: "Session not found" }, { status: 404 });
+      }
+      return NextResponse.json(toSnapshot(stopped as unknown as SessionRow));
     }
 
     // ── Step through the fetched bars ───────────────────────────────────────

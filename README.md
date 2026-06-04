@@ -81,13 +81,13 @@ Steps 4–5 are optional: the app falls back to a synthetic 60-bar sample if no 
 | Route | Purpose |
 |-------|---------|
 | `/` | Home |
-| `/strategies` | List strategies |
+| `/strategies` | List strategies; create via **New Strategy** (name only) |
 | `/strategies/[id]` | Strategy workspace: canvas, AI panel, backtest + paper tabs |
 | `/market-data` | Data coverage dashboard: candles, funding rates, open interest, ingestion jobs |
 
 ## Known Limitations
 
-- **AI strategy**: Stub only — returns same RSI strategy for any prompt.
+- **AI strategy**: Requires `ANTHROPIC_API_KEY`; LLM output is non-deterministic (one validation retry).
 - **Paper execution on poll**: No background worker; engine advances only when the client tab is visible and polling.
 - **Real-bar replay speed**: At most 5 candles per poll (≈1 s interval) to keep the UI responsive.
 - **Single instrument ingested by default**: Run `npm run ingest -- --symbol "ETH/USDT:USDT"` to add more.

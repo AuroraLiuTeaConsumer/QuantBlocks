@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { validateGraph } from "@/lib/strategy/validator";
 
 // GET /api/strategies/:id
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -21,16 +20,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const existing = await prisma.strategy.findUnique({ where: { id } });
   if (!existing) {
     return NextResponse.json({ error: "Strategy not found" }, { status: 404 });
-  }
-
-  if (nodes && edges) {
-    const validation = validateGraph({ nodes, edges });
-    if (!validation.valid) {
-      return NextResponse.json(
-        { error: "Invalid graph", details: validation.errors },
-        { status: 400 },
-      );
-    }
   }
 
   const strategy = await prisma.strategy.update({

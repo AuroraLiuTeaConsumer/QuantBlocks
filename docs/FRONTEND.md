@@ -4,6 +4,7 @@
 
 | Component | Path | Purpose |
 |-----------|------|---------|
+| Strategies list | `app/strategies/page.tsx` | List strategies; **New Strategy** inline form → POST `/api/strategies` → redirect to workspace |
 | StrategyWorkspace | `components/strategy/StrategyWorkspace.tsx` | Main layout, header, draft banner, backtest/paper tabs |
 | StrategyCanvas | `components/strategy/StrategyCanvas.tsx` | React Flow canvas, autosave (1.5s debounce), node types |
 | AiPromptPanel | `components/strategy/AiPromptPanel.tsx` | Textarea + Generate, validates response with Zod |

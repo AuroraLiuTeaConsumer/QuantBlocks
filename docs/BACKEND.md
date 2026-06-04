@@ -35,6 +35,18 @@
 
 ## API Shapes
 
+### POST `/api/strategies`
+
+**Request**: `{ name, description?, timeframe?, nodes?, edges? }` — only `name` is required  
+**Response**: Strategy object (201). Defaults: `instrument=BTC-PERP`, `timeframe=1h`.  
+**Notes**: No `validateGraph` on create — blank canvas (`nodes`/`edges` omitted or `[]`) is valid. Graph validation runs when starting a backtest or applying AI output.
+
+### PUT `/api/strategies/[id]`
+
+**Request**: `{ name?, description?, timeframe?, nodes?, edges? }`  
+**Response**: Strategy object  
+**Notes**: Saves incremental canvas edits without graph validation. Invalid graphs are rejected at backtest start (`400` with validation errors).
+
 ### POST `/api/strategies/[id]/backtests`
 
 **Request**: `{ initialCapital?, feeBps?, startTime?, endTime? }` (all optional; defaults: `initialCapital=10000`, `feeBps=5`, `startTime=now−90d`, `endTime=now`)  
@@ -230,7 +242,7 @@ Used in backtest route, bars route, and market-data routes.
 
 ## Known Backend Risks
 
-- Paper bars are still synthetic; no real-time feed.
+- Paper synthetic mode uses random-walk bars; real-bar mode replays TimescaleDB history (not a live stream).
 - Paper execution only on poll; no real-time advancement.
 - `fetchOpenInterestHistory` not available on all CCXT exchanges — service throws, job is marked failed.
 - No rate limiting or auth on API routes.

@@ -17,7 +17,7 @@ One-liner: **Talk to build, visualize to verify, backtest to validate.**
 | 1–2 | Strategy CRUD, React Flow canvas, backtest engine, paper trading engine |
 | 3 | Hyperliquid native provider, WebSocket live candle ingestion, real-bar paper trading (`useRealBars` / `barCursor`) |
 | 4 | CoinGlass derivatives data — `liquidations` + `long_short_ratios` hypertables, ingestion services, API routes, coverage dashboard |
-| 5 | Risk-adjusted metrics (Sharpe, Sortino, Calmar, benchmark), per-bar funding cost in backtest, CSV export (`GET /api/backtests/:runId/export`), 10-card metrics grid in UI |
+| 5 | Risk-adjusted metrics, funding cost, CSV export, 10-card metrics grid; strategy creation UX (`/strategies` New Strategy; POST/PUT without `validateGraph`) |
 
 The project is in a clean, passing state. `npx tsc --noEmit` is clean. All 25 tests pass.
 
@@ -64,12 +64,14 @@ The project is in a clean, passing state. `npx tsc --noEmit` is clean. All 25 te
 - **CLI jobs**: `npm run ingest` (backfill), `npm run ws:ingest` (Binance USDT-M WebSocket live feed)
 
 ### API Routes (`src/app/api/`)
-- Full CRUD for strategies; backtest trigger + poll; paper session lifecycle (start/stop/reset/poll/trades)
+- Full CRUD for strategies — POST requires `name` only (optional nodes/edges); PUT saves canvas without graph validation; `validateGraph` runs on backtest start and AI translate only
+- Backtest trigger + poll; paper session lifecycle (start/stop/reset/poll/trades)
 - `GET /api/backtests/:runId/export` — CSV download (METRICS + TRADES + EQUITY_CURVE sections)
 - Market data: candles, funding rates, open interest, liquidations, long/short ratios — each has GET (query) + POST (trigger ingest)
 - `POST /api/market-data/ingest` — unified entry point; supports `dataType`: candle | funding_rate | open_interest | liquidation | long_short
 
-### UI (`src/components/strategy/`)
+### UI (`src/app/strategies/`, `src/components/strategy/`)
+- `/strategies` list page — "New Strategy" button, inline name form, POST create with empty graph
 - `StrategyWorkspace` → `StrategyCanvas` (React Flow) + `AiPromptPanel` + `BacktestPanel` + `PaperTradingPanel`
 - `BacktestPanel`: 10-card metrics grid (5×2), equity curve chart, trades table, "Export CSV" button
 - `PaperTradingPanel`: start/stop/reset, real-bars checkbox + replay-from date picker, TwoPaneChart streaming
@@ -84,7 +86,7 @@ src/
 ├── __tests__/            # Vitest: validator, engine, backtest (25 tests)
 ├── app/
 │   ├── api/
-│   │   ├── ai/translateStrategy/       # Stub — always returns RSI graph
+│   │   ├── ai/translateStrategy/       # claude-sonnet-4-6 + validateGraph + retry
 │   │   ├── backtests/[runId]/          # GET run, GET trades, GET export
 │   │   ├── market-data/                # candles, coverage, funding-rates, ingest,
 │   │   │                               #   jobs, liquidations, long-short-ratios, OI
@@ -152,7 +154,7 @@ scripts/setup-timescale.ts             # Runs all db/migrations/timescale/*.sql 
 | 5 | Paper execution only on poll | Expected limitation; advances only when client polls |
 | 6 | Session resume on tab switch | Panel unmounts; no "resume session" UX |
 | ~~7~~ | ~~AI stub~~ | ✅ Resolved — `POST /api/ai/translateStrategy` now calls `claude-sonnet-4-6`; one self-correction retry; requires `ANTHROPIC_API_KEY` |
-| 8 | Strategy creation UX | No "New Strategy" button in UI; create via API or seed only |
+| ~~8~~ | ~~Strategy creation UX~~ | ✅ Resolved — `/strategies` "New Strategy" button + name form; POST/PUT allow empty/incremental graphs |
 | 9 | Optimistic lock retry | Paper session update can fail silently on concurrent polls |
 | 10 | No auth / rate limiting | All API routes are unprotected |
 | 17 | OI availability | `fetchOpenInterestHistory` not supported on all CCXT exchanges |
@@ -234,8 +236,6 @@ npm run ws:ingest -- --symbols BTCUSDT,ETHUSDT --timeframe 1m
 All MVP phases are complete. The highest-value open items are:
 
 **Item #6 — Session resume on tab switch**: `PaperTradingPanel` unmounts when the user navigates away; the session lives in the DB but the panel starts fresh on return. Add a "resume session" UX that fetches the latest running session for the strategy on mount and re-attaches polling.
-
-**Item #8 — Strategy creation UX**: No "New Strategy" button in the UI. Users must create strategies via the API (`POST /api/strategies`) or the Prisma seed. Add a modal or dedicated page that accepts a name, instrument, and timeframe.
 
 **Item #9 — Optimistic lock retry**: The paper session poll update (`GET /api/paper/:sessionId`) can silently lose an update when two concurrent polls collide. Add a retry loop (≤3 attempts) around the Prisma update.
 

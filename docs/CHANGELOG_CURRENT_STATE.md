@@ -8,7 +8,8 @@
 
 - React Flow graph editor with 13 node types: price, volume, rsi, constant, compare, cross, and, or, not, open_position, close_position, set_risk
 - Autosave (1.5s debounce) + manual Save
-- PUT `/api/strategies/:id` with Zod-validated graph
+- PUT `/api/strategies/:id` — saves nodes/edges without server-side graph validation (incremental canvas edits)
+- POST `/api/strategies` — create with `name` only; blank canvas valid; `/strategies` UI has "New Strategy" form
 - Node types: `components/strategy/nodeTypes/*`
 
 ### AI Strategy Draft (M2)

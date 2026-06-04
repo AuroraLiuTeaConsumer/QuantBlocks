@@ -66,7 +66,7 @@ QuantBlocks is a full-stack Next.js application. Frontend and API routes run in 
 
 | Layer | Path | Responsibility |
 |-------|------|----------------|
-| Strategies API | `app/api/strategies/route.ts`, `[id]/route.ts` | CRUD strategies |
+| Strategies API | `app/api/strategies/route.ts`, `[id]/route.ts` | CRUD strategies; POST requires `name` only; PUT saves graph without validation (backtest/AI validate at run time) |
 | Bars API | `app/api/strategies/[id]/bars/route.ts` | Real candles from TimescaleDB; synthetic fallback |
 | Backtests API | `app/api/strategies/[id]/backtests/route.ts` | POST creates run; loads real candles via BacktestDataLoader |
 | Paper API | `app/api/strategies/[id]/paper/start`, `app/api/paper/[sessionId]/*` | Session lifecycle |
@@ -155,21 +155,22 @@ Issues are logged as warnings but do **not** block ingestion. Aggregated `Qualit
 
 ## Strategy Graph Flow
 
-1. **Save**: StrategyCanvas → PUT `/api/strategies/:id` → `validateGraph` → Prisma update.
-2. **Backtest**: BacktestPanel → POST `/api/strategies/:id/backtests` → `BacktestDataLoader.load()` → real candles (or SAMPLE_CANDLES fallback) → `runBacktest` → trades persisted.
-3. **Paper (synthetic)**: PaperTradingPanel → POST `/api/strategies/:id/paper/start` → PaperSession; GET `/api/paper/:sessionId` generates random-walk bars per poll.
-4. **Paper (real bars)**: POST start with `{ useRealBars: true, replayFrom?: ISO }` → PaperSession with `useRealBars=true`; poll route fetches up to 5 real candles from TimescaleDB after `barCursor`; advances engine + updates cursor.
+1. **Save**: StrategyCanvas → PUT `/api/strategies/:id` → Prisma update (no graph validation; supports incremental edits and empty canvas).
+2. **Create**: `/strategies` → POST `/api/strategies` with `{ name }` (optional empty `nodes`/`edges`) → redirect to workspace.
+3. **Backtest**: BacktestPanel → POST `/api/strategies/:id/backtests` → `validateGraph` → `BacktestDataLoader.load()` → real candles (or SAMPLE_CANDLES fallback) → `runBacktest` → trades persisted.
+4. **Paper (synthetic)**: PaperTradingPanel → POST `/api/strategies/:id/paper/start` → PaperSession; GET `/api/paper/:sessionId` generates random-walk bars per poll.
+5. **Paper (real bars)**: POST start with `{ useRealBars: true, replayFrom?: ISO }` → PaperSession with `useRealBars=true`; poll route fetches up to 5 real candles from TimescaleDB after `barCursor`; advances engine + updates cursor.
 
 ## Separation of Concerns
 
 | Concern | Location |
 |---------|----------|
-| UI | `components/strategy/*`, `app/market-data/page.tsx` |
+| UI | `app/strategies/page.tsx`, `components/strategy/*`, `app/market-data/page.tsx` |
 | Route handlers | `app/api/*` |
 | Engine logic | `lib/strategy/engine/*`, `lib/backtest/backtest.ts` |
 | Metrics computation | `lib/backtest/metrics.ts` |
 | Funding cost per bar | `lib/backtest/funding.ts` |
-| Validation | `lib/strategy/validator.ts`, `lib/strategy/graphTypes.ts` |
+| Validation | `lib/strategy/validator.ts` (backtest + AI translate); `compileGraph` at paper poll; save/create routes do not validate |
 | Market data fetch | `lib/market-data/providers/ccxt.provider.ts` |
 | CoinGlass data fetch | `lib/market-data/providers/coinglass.provider.ts` |
 | Data quality | `lib/market-data/ingestion/quality-checker.ts` |
@@ -187,5 +188,4 @@ Issues are logged as warnings but do **not** block ingestion. Aggregated `Qualit
 2. **No real-time feed**: Real-bar mode replays historical candles from TimescaleDB; it is not driven by a live stream. Phase 4 would add Redis pub/sub for true live advancement.
 3. **Session persistence**: Paper panel state resets on tab switch; session lives in DB but panel starts fresh on return (no "resume session" UX).
 4. **AI quality**: LLM output is non-deterministic; the retry loop handles most validation failures but exotic prompts may still return a 422.
-5. **Strategy creation UX**: No "New Strategy" UI — create via API or seed.
-6. **OI availability**: `fetchOpenInterestHistory` is not supported on all CCXT exchanges; service throws and ingestion job records the failure.
+5. **OI availability**: `fetchOpenInterestHistory` is not supported on all CCXT exchanges; service throws and ingestion job records the failure.

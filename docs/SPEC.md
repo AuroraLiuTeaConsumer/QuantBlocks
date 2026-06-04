@@ -253,11 +253,13 @@ We model a simple **signal graph**:
 
 ## 11. API Surface (MVP)
 ### Strategies
-- POST /api/strategies
+- POST /api/strategies  (`name` required; `nodes`/`edges` optional — blank canvas OK)
 - GET /api/strategies
 - GET /api/strategies/:id
-- PUT /api/strategies/:id  (updates nodes/edges/name/desc)
+- PUT /api/strategies/:id  (updates nodes/edges/name/desc; no graph validation on save)
 - DELETE /api/strategies/:id
+
+> `validateGraph()` runs on backtest start and AI translate, not on POST/PUT save.
 
 ### Backtests
 - POST /api/strategies/:id/backtests  (start)

@@ -22,6 +22,7 @@
 | 32 | Funding rate cost factored into backtest PnL | ✅ Phase 5 — `lib/backtest/funding.ts` `barFundingCost`; deducted per bar from equity; `fundingCostPaid` in metrics; best-effort DB load in backtest route |
 | 35 | Export backtest results (CSV) | ✅ Phase 5 — `GET /api/backtests/:runId/export`; CSV with METRICS, TRADES, EQUITY_CURVE sections; "Export CSV" button in BacktestPanel |
 | 7 | AI stub → real LLM | ✅ `POST /api/ai/translateStrategy` now calls `claude-sonnet-4-6`; system prompt covers all node types, handle names, and validation rules; `validateGraph()` check with one self-correction retry; requires `ANTHROPIC_API_KEY` env var |
+| 8 | Strategy creation UX | ✅ "New Strategy" button + inline name form on `/strategies` already existed; unblocked by removing `validateGraph` from POST (blank canvas is valid) and PUT (canvas saves incremental states; backtest uses `validateGraph`, paper uses `compileGraph` at run time) |
 
 **Phase 5 summary**: extracted `computeMetrics` into `lib/backtest/metrics.ts`; added risk-adjusted ratios (Sharpe, Sortino, Calmar) and benchmark return; added per-bar funding cost via `lib/backtest/funding.ts` with best-effort DB load; added CSV export endpoint; expanded BacktestPanel metrics grid from 6 to 10 cards; no DB/Prisma schema changes required.
 
@@ -37,7 +38,7 @@
 |---|-------|-------|
 | 6 | Session resume on tab switch | Paper panel unmounts; no "resume session" UX |
 | ~~7~~ | ~~AI stub~~ | ✅ Resolved — see Resolved table |
-| 8 | Strategy creation UX | No "New Strategy" in UI; only API/seed |
+| ~~8~~ | ~~Strategy creation UX~~ | ✅ Resolved — see Resolved table |
 | 9 | Optimistic lock retry | Paper session update can fail; no retry on conflict |
 | 10 | Auth / rate limiting | API routes unprotected |
 | 11 | Error boundaries | Unhandled errors can blank page |

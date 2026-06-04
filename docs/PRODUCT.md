@@ -12,9 +12,9 @@ QuantBlocks = **TradingView + Hyperliquid + AI Strategy Builder**: visual strate
 
 ## Core Workflows
 
-1. **Strategy creation**: Currently via API or seed; no in-app "Create Strategy" flow.
-2. **Strategy editing**: Open `/strategies/:id` → edit graph in canvas → autosave or manual save.
-3. **AI draft**: Enter prompt in left panel → Generate → Apply or Cancel. Stub returns fixed RSI strategy.
+1. **Strategy creation**: `/strategies` → **New Strategy** → enter name → POST `/api/strategies` → opens workspace with empty canvas.
+2. **Strategy editing**: Open `/strategies/:id` → edit graph in canvas → autosave (1.5s debounce). PUT saves without server-side graph validation; incomplete graphs are OK until backtest.
+3. **AI draft**: Enter prompt in left panel → Generate → Apply or Cancel. `claude-sonnet-4-6` translates prompt; `validateGraph()` with one retry on failure.
 4. **Backtest**: Click Run Backtest → poll until complete → view metrics, equity curve, trades.
 5. **Paper trading**: Click Start → session runs; poll advances simulated bars → view stats and trades. Stop or Reset when done.
 
@@ -32,15 +32,14 @@ QuantBlocks = **TradingView + Hyperliquid + AI Strategy Builder**: visual strate
 
 | Area | Now | Planned |
 |------|-----|---------|
-| Bars | Synthetic random-walk | Real exchange (Hyperliquid, etc.) |
-| Backtest data | 60 fixed candles | Configurable range, real historical |
-| Paper bars | Simulated per poll | Real or replay feed |
-| AI | Stub (fixed RSI) | LLM translation |
-| Exchange | None | Hyperliquid paper/live |
-| Session persistence | DB only | UI survives tab switch |
+| Strategy creation | In-app "New Strategy" on `/strategies` | Instrument/timeframe picker on create |
+| Bars / backtest | TimescaleDB real candles; synthetic fallback | More instruments, longer history |
+| Paper bars | Synthetic random-walk or real-bar replay from TimescaleDB | Live Redis stream (background worker) |
+| AI | Claude Sonnet graph translation | Richer prompts, templates |
+| Exchange execution | None | Hyperliquid live |
+| Session persistence | DB only | UI resume on tab switch |
 
-## Why Real Historical Data Is Pending
+## Data Sources
 
-- Bars route (`/api/strategies/:id/bars`) is implemented as synthetic random-walk for development and demo.
-- Backtest uses `SAMPLE_CANDLES` in `lib/data/candles.ts` — hardcoded 60 bars.
-- Real data requires: exchange API integration, storage/caching, date-range queries, and alignment with strategy timeframe. Not yet implemented.
+- **Backtest / chart bars**: `BacktestDataLoader` and bars API query TimescaleDB (CCXT-ingested); fall back to `SAMPLE_CANDLES` when coverage < 80% or DB unavailable.
+- **Paper (real-bar mode)**: Replays stored candles after `barCursor`; not a live WebSocket feed.

@@ -31,7 +31,7 @@
 | POST | `/api/market-data/liquidations` | Trigger liquidation ingestion (503 if no key) |
 | GET | `/api/market-data/long-short-ratios` | Query stored CoinGlass L/S account ratios |
 | POST | `/api/market-data/long-short-ratios` | Trigger long/short ratio ingestion (503 if no key) |
-| POST | `/api/ai/translateStrategy` | **Stub** — returns RSI graph |
+| POST | `/api/ai/translateStrategy` | Calls `claude-sonnet-4-6`; validates graph; one retry on failure. Requires `ANTHROPIC_API_KEY`. |
 
 ## API Shapes
 

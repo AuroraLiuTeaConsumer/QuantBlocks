@@ -76,7 +76,7 @@ QuantBlocks is a full-stack Next.js application. Frontend and API routes run in 
 | Ingestion jobs | `app/api/market-data/jobs/route.ts` | GET recent IngestionJob records |
 | Funding rates | `app/api/market-data/funding-rates/route.ts` | GET query + POST ingest |
 | Open interest | `app/api/market-data/open-interest/route.ts` | GET query + POST ingest |
-| AI translate | `app/api/ai/translateStrategy/route.ts` | **Stub**: always returns RSI graph |
+| AI translate | `app/api/ai/translateStrategy/route.ts` | Calls `claude-sonnet-4-6`; validates with `validateGraph()`; one self-correction retry; requires `ANTHROPIC_API_KEY` |
 
 ## Market Data Layer
 
@@ -186,6 +186,6 @@ Issues are logged as warnings but do **not** block ingestion. Aggregated `Qualit
 1. **Poll-only paper advancement**: Paper trading advances only when a client polls. No background worker — if no tab is open, the session does not advance. Multiple concurrent tabs risk double-advancement (optimistic lock mitigates). Real-bar replay is fully implemented; synthetic mode is still available as a fallback.
 2. **No real-time feed**: Real-bar mode replays historical candles from TimescaleDB; it is not driven by a live stream. Phase 4 would add Redis pub/sub for true live advancement.
 3. **Session persistence**: Paper panel state resets on tab switch; session lives in DB but panel starts fresh on return (no "resume session" UX).
-4. **AI stub**: No real LLM; always same RSI strategy.
+4. **AI quality**: LLM output is non-deterministic; the retry loop handles most validation failures but exotic prompts may still return a 422.
 5. **Strategy creation UX**: No "New Strategy" UI — create via API or seed.
 6. **OI availability**: `fetchOpenInterestHistory` is not supported on all CCXT exchanges; service throws and ingestion job records the failure.

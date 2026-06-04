@@ -14,7 +14,7 @@
 ### AI Strategy Draft (M2)
 
 - AiPromptPanel: textarea + Generate button
-- POST `/api/ai/translateStrategy` — **stub**: always returns RSI strategy
+- POST `/api/ai/translateStrategy` — calls `claude-sonnet-4-6`; validates with `validateGraph()`; one self-correction retry; requires `ANTHROPIC_API_KEY`
 - Apply / Cancel flow; Zod validation of response
 - Draft → Apply → Save to canvas
 

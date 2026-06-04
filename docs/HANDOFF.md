@@ -151,7 +151,7 @@ scripts/setup-timescale.ts             # Runs all db/migrations/timescale/*.sql 
 |---|------|-------|
 | 5 | Paper execution only on poll | Expected limitation; advances only when client polls |
 | 6 | Session resume on tab switch | Panel unmounts; no "resume session" UX |
-| 7 | AI stub | `POST /api/ai/translateStrategy` always returns a hardcoded RSI graph |
+| ~~7~~ | ~~AI stub~~ | ✅ Resolved — `POST /api/ai/translateStrategy` now calls `claude-sonnet-4-6`; one self-correction retry; requires `ANTHROPIC_API_KEY` |
 | 8 | Strategy creation UX | No "New Strategy" button in UI; create via API or seed only |
 | 9 | Optimistic lock retry | Paper session update can fail silently on concurrent polls |
 | 10 | No auth / rate limiting | All API routes are unprotected |
@@ -231,20 +231,15 @@ npm run ws:ingest -- --symbols BTCUSDT,ETHUSDT --timeframe 1m
 
 ## 11. Next Immediate Task
 
-The highest-value unblocked item is **item #7 — replace the AI stub** with a real LLM integration:
+All MVP phases are complete. The highest-value open items are:
 
-`src/app/api/ai/translateStrategy/route.ts` currently ignores the prompt and always returns a hardcoded RSI crossover graph. The contract (defined in `docs/SPEC.md` §10) is:
+**Item #6 — Session resume on tab switch**: `PaperTradingPanel` unmounts when the user navigates away; the session lives in the DB but the panel starts fresh on return. Add a "resume session" UX that fetches the latest running session for the strategy on mount and re-attaches polling.
 
-**Input**: `{ prompt: string, timeframe?: string }`  
-**Output**: `{ strategyName, timeframe, nodes, edges, notes }` — must validate against `validateGraph()`
+**Item #8 — Strategy creation UX**: No "New Strategy" button in the UI. Users must create strategies via the API (`POST /api/strategies`) or the Prisma seed. Add a modal or dedicated page that accepts a name, instrument, and timeframe.
 
-Suggested approach:
-1. Call the Anthropic Claude API (model: `claude-sonnet-4-6`) with a system prompt that describes the node type schema from `src/lib/strategy/graphTypes.ts` and the graph validation rules from `src/lib/strategy/validator.ts`
-2. Parse and validate the JSON response with `validateGraph()`
-3. If validation fails, retry once with the error messages appended to the prompt
-4. Return the validated graph or a `{ error }` response
+**Item #9 — Optimistic lock retry**: The paper session poll update (`GET /api/paper/:sessionId`) can silently lose an update when two concurrent polls collide. Add a retry loop (≤3 attempts) around the Prisma update.
 
-No new DB tables needed. No new ingestion. API key: add `ANTHROPIC_API_KEY` to `.env`.
+See `docs/TODO.md` for the full prioritised backlog.
 
 ---
 

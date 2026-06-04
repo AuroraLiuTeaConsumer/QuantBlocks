@@ -267,6 +267,31 @@ export function PaperTradingPanel({
       const data = await safeJson(res);
       if (!mountedRef.current) return;
       if (!res.ok) {
+        // 409 means a running session with different settings already exists.
+        // The response includes its sessionId. Attach to it so the Stop controls
+        // appear and the user can reconfigure rather than seeing a dead-end error.
+        if (res.status === 409 && typeof data.sessionId === "string") {
+          const existingId = data.sessionId;
+          setError(
+            (data.error as string | undefined) ??
+              "A session is already running. Stop it to change settings."
+          );
+          setLoading(false);
+          try {
+            const snapRes = await fetch(`/api/paper/${existingId}`);
+            if (snapRes.ok && mountedRef.current) {
+              const snap = (await snapRes.json()) as SessionSnapshot;
+              if (mountedRef.current) {
+                setSession(snap);
+                appendFromSnapshot(snap);
+                if (snap.status === "running") startPolling(snap.id);
+              }
+            }
+          } catch {
+            // ignore — error message already shown
+          }
+          return;
+        }
         setError((data.error as string | undefined) ?? "Failed to start");
         setLoading(false);
         return;

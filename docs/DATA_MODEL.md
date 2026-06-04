@@ -104,8 +104,8 @@ TimescaleDB (raw SQL, not Prisma):
 | positionSide, positionQty, positionEntryPrice | string?, float, float? | |
 | positionOpenedAt | DateTime? | |
 | engineState | Json? | Serialized EngineState |
-| useRealBars | Boolean | Default false; replay real TimescaleDB candles instead of synthetic |
-| barCursor | DateTime? | Last replayed candle's open_time; null = start from earliest |
+| useRealBars | Boolean | Always true on new sessions; legacy rows may be false but poll route always uses TimescaleDB |
+| barCursor | DateTime? | Last replayed candle's open_time; null → poll defaults to startedAt − 90 days |
 | startedAt, updatedAt, createdAt | DateTime | |
 
 ### PaperTrade

@@ -17,17 +17,13 @@ export async function POST(
 ) {
   const { id } = await params;
 
-  // Optional body: { useRealBars?: boolean; replayFrom?: string (ISO date) }
-  let useRealBars = false;
+  // Optional body: { replayFrom?: string (ISO date) }
   let barCursor: Date | null = null;
   try {
     const body = await req.json() as Record<string, unknown>;
-    if (body.useRealBars === true) {
-      useRealBars = true;
-      if (typeof body.replayFrom === "string" && body.replayFrom) {
-        const d = new Date(body.replayFrom);
-        if (!isNaN(d.getTime())) barCursor = d;
-      }
+    if (typeof body.replayFrom === "string" && body.replayFrom) {
+      const d = new Date(body.replayFrom);
+      if (!isNaN(d.getTime())) barCursor = d;
     }
   } catch {
     // empty / non-JSON body — use defaults
@@ -39,22 +35,19 @@ export async function POST(
       return NextResponse.json({ error: "Strategy not found" }, { status: 404 });
     }
 
-    // If there's already a running session for this strategy, either resume
-    // it or reject if the caller's params conflict with its configuration.
+    // If there's already a running session, return it — unless the caller
+    // wants a different replay date, which requires stopping first.
     const existing = await prisma.paperSession.findFirst({
       where: { strategyId: id, status: "running" },
       orderBy: { createdAt: "desc" },
     });
 
     if (existing) {
-      const wantsDifferentMode = useRealBars !== existing.useRealBars;
-      const wantsNewReplayDate = barCursor !== null;
-      if (wantsDifferentMode || wantsNewReplayDate) {
+      if (barCursor !== null) {
         return NextResponse.json(
           {
             error:
-              "A session is already running with different settings. " +
-              "Stop the current session before changing real-bar mode or replay date.",
+              "A session is already running. Stop it before changing the replay date.",
             sessionId: existing.id,
           },
           { status: 409 },
@@ -64,7 +57,7 @@ export async function POST(
     }
 
     // Seed lastPrice from the most recent closed candle so the initial price
-    // display and synthetic random-walk start at a realistic level.
+    // display starts at a realistic level instead of the hardcoded fallback.
     let initialPrice = FALLBACK_PRICE;
     const mapping = resolveInstrument(strategy.instrument);
     const tf = isTimeframe(strategy.timeframe) ? strategy.timeframe : null;
@@ -103,7 +96,7 @@ export async function POST(
         positionSide: null,
         positionQty: 0,
         positionEntryPrice: null,
-        useRealBars,
+        useRealBars: true,
         barCursor,
         engineState: JSON.parse(JSON.stringify(engineState)) as Prisma.InputJsonValue,
         startedAt: new Date(),

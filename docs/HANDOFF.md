@@ -54,7 +54,8 @@ The project is in a clean, passing state. `npx tsc --noEmit` is clean. All 25 te
 
 ### Paper Trading (`src/lib/paper/engine.ts`, `src/app/api/paper/`)
 - `PaperSession` in Prisma; poll route advances engine per GET; optimistic lock on update
-- Two modes: synthetic random-walk bars, or real-bar replay from TimescaleDB via `useRealBars` + `barCursor`
+- Real-bar replay only from TimescaleDB via `barCursor` (synthetic random-walk removed); `useRealBars` always true on new sessions
+- Mount resume: GET `/api/strategies/:id/paper/session` + `PaperTradingPanel` restores running/stopped sessions on load
 - `barCursor` defaults to `session.startedAt − 90 days` (not epoch) when null
 
 ### Market Data (`src/lib/market-data/`)
@@ -65,7 +66,7 @@ The project is in a clean, passing state. `npx tsc --noEmit` is clean. All 25 te
 
 ### API Routes (`src/app/api/`)
 - Full CRUD for strategies — POST requires `name` only (optional nodes/edges); PUT saves canvas without graph validation; `validateGraph` runs on backtest start and AI translate only
-- Backtest trigger + poll; paper session lifecycle (start/stop/reset/poll/trades)
+- Backtest trigger + poll; paper session lifecycle (session GET, start/stop/reset/poll/trades)
 - `GET /api/backtests/:runId/export` — CSV download (METRICS + TRADES + EQUITY_CURVE sections)
 - Market data: candles, funding rates, open interest, liquidations, long/short ratios — each has GET (query) + POST (trigger ingest)
 - `POST /api/market-data/ingest` — unified entry point; supports `dataType`: candle | funding_rate | open_interest | liquidation | long_short
@@ -74,7 +75,7 @@ The project is in a clean, passing state. `npx tsc --noEmit` is clean. All 25 te
 - `/strategies` list page — "New Strategy" button, inline name form, POST create with empty graph
 - `StrategyWorkspace` → `StrategyCanvas` (React Flow) + `AiPromptPanel` + `BacktestPanel` + `PaperTradingPanel`
 - `BacktestPanel`: 10-card metrics grid (5×2), equity curve chart, trades table, "Export CSV" button
-- `PaperTradingPanel`: start/stop/reset, real-bars checkbox + replay-from date picker, TwoPaneChart streaming
+- `PaperTradingPanel`: auto-resume on mount, start/stop/reset, replay-from date picker, TwoPaneChart streaming
 - `/market-data` server-side coverage dashboard: candles, funding rates, OI, liquidations, L/S ratios, jobs
 
 ---
@@ -91,7 +92,7 @@ src/
 │   │   ├── market-data/                # candles, coverage, funding-rates, ingest,
 │   │   │                               #   jobs, liquidations, long-short-ratios, OI
 │   │   ├── paper/[sessionId]/          # GET poll, POST stop/reset, GET trades
-│   │   └── strategies/                 # CRUD + [id]/bars + [id]/backtests + [id]/paper/start
+│   │   └── strategies/                 # CRUD + [id]/bars + [id]/backtests + [id]/paper/{start,session}
 │   ├── market-data/page.tsx            # Coverage dashboard (server component)
 │   └── strategies/                     # List page + [id] workspace page
 ├── components/strategy/                # All UI panels and chart components
@@ -138,7 +139,8 @@ scripts/setup-timescale.ts             # Runs all db/migrations/timescale/*.sql 
 | `src/lib/market-data/types.ts` | All domain types + `INSTRUMENT_MAP` + `TIMEFRAME_MS` |
 | `src/app/api/strategies/[id]/backtests/route.ts` | Loads candles + funding rates; calls `runBacktest`; persists result |
 | `src/app/api/paper/[sessionId]/route.ts` | Poll route; advances engine; optimistic lock; real-bar cursor advancement |
-| `src/app/api/strategies/[id]/paper/start/route.ts` | Creates PaperSession; all Prisma calls wrapped in try/catch |
+| `src/app/api/strategies/[id]/paper/session/route.ts` | GET latest running/stopped session for mount resume |
+| `src/app/api/strategies/[id]/paper/start/route.ts` | Creates PaperSession (always real bars); returns existing running session |
 | `src/components/strategy/BacktestPanel.tsx` | 10-card metrics grid; Export CSV button; equity chart |
 | `src/components/strategy/PaperTradingPanel.tsx` | Uses `safeJson()` helper for all fetch calls |
 | `prisma/schema.prisma` | App DB schema — do not run `prisma migrate dev` on a running DB (drifts with TimescaleDB raw tables) |
@@ -152,7 +154,7 @@ scripts/setup-timescale.ts             # Runs all db/migrations/timescale/*.sql 
 | # | Item | Notes |
 |---|------|-------|
 | 5 | Paper execution only on poll | Expected limitation; advances only when client polls |
-| 6 | Session resume on tab switch | Panel unmounts; no "resume session" UX |
+| ~~6~~ | ~~Session resume on tab switch~~ | ✅ Resolved — GET `/api/strategies/:id/paper/session` + panel mount restore |
 | ~~7~~ | ~~AI stub~~ | ✅ Resolved — `POST /api/ai/translateStrategy` now calls `claude-sonnet-4-6`; one self-correction retry; requires `ANTHROPIC_API_KEY` |
 | ~~8~~ | ~~Strategy creation UX~~ | ✅ Resolved — `/strategies` "New Strategy" button + name form; POST/PUT allow empty/incremental graphs |
 | 9 | Optimistic lock retry | Paper session update can fail silently on concurrent polls |
@@ -234,8 +236,6 @@ npm run ws:ingest -- --symbols BTCUSDT,ETHUSDT --timeframe 1m
 ## 11. Next Immediate Task
 
 All MVP phases are complete. The highest-value open items are:
-
-**Item #6 — Session resume on tab switch**: `PaperTradingPanel` unmounts when the user navigates away; the session lives in the DB but the panel starts fresh on return. Add a "resume session" UX that fetches the latest running session for the strategy on mount and re-attaches polling.
 
 **Item #9 — Optimistic lock retry**: The paper session poll update (`GET /api/paper/:sessionId`) can silently lose an update when two concurrent polls collide. Add a retry loop (≤3 attempts) around the Prisma update.
 

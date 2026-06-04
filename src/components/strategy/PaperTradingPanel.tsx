@@ -116,7 +116,7 @@ export function PaperTradingPanel({
   const [trades, setTrades] = useState<PaperTrade[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [useRealBars, setUseRealBars] = useState(false);
+  const [restoring, setRestoring] = useState(true);
   const [replayFrom, setReplayFrom] = useState("");
 
   const mountedRef = useRef(true);
@@ -252,13 +252,38 @@ export function PaperTradingPanel({
     [stopPolling, pollSession, pollTrades]
   );
 
+  // On mount (and whenever strategyId changes), check for an existing active
+  // session so the user doesn't have to click Start after a page refresh.
+  useEffect(() => {
+    let cancelled = false;
+    setRestoring(true);
+    setSession(null);
+    setTrades([]);
+
+    fetch(`/api/strategies/${strategyId}/paper/session`)
+      .then(async (res) => {
+        if (cancelled) return;
+        if (!res.ok) { setRestoring(false); return; } // 404 → no active session
+        const snap = (await res.json()) as SessionSnapshot;
+        if (cancelled) return;
+        setSession(snap);
+        pollTrades(snap.id);
+        if (snap.status === "running") startPolling(snap.id);
+        setRestoring(false);
+      })
+      .catch(() => { if (!cancelled) setRestoring(false); });
+
+    return () => { cancelled = true; };
+  }, [strategyId, startPolling, pollTrades]);
+
   const handleStart = async () => {
     setError(null);
     setLoading(true);
+    setRestoring(false);
     resetChart();
     try {
-      const body: Record<string, unknown> = { useRealBars };
-      if (useRealBars && replayFrom) body.replayFrom = replayFrom;
+      const body: Record<string, unknown> = { useRealBars: true };
+      if (replayFrom) body.replayFrom = replayFrom;
       const res = await fetch(`/api/strategies/${strategyId}/paper/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -358,7 +383,6 @@ export function PaperTradingPanel({
   const canStart = !isRunning && !disableRun && !loading;
   const canStop = isRunning;
   const canReset = session != null && !isRunning;
-  const activeUseRealBars = session?.useRealBars ?? false;
 
   const statusStyle = (() => {
     switch (status) {
@@ -392,40 +416,19 @@ export function PaperTradingPanel({
               style={{ background: "var(--accent)" }}
             />
           )}
-          {isRunning && (
-            <span
-              className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
-              style={{
-                background: activeUseRealBars ? "var(--accent-bg)" : "var(--surface-2)",
-                color: activeUseRealBars ? "var(--accent)" : "var(--text-2)",
-              }}
-            >
-              {activeUseRealBars ? "Real Bars" : "Synthetic"}
-            </span>
-          )}
         </div>
 
-        {/* Real bars config — only shown when not running */}
+        {/* Replay date — only shown when not running */}
         {!isRunning && (
-          <div className="flex flex-wrap items-center gap-2 text-xs text-ink-2">
-            <label className="flex cursor-pointer items-center gap-1.5">
-              <input
-                type="checkbox"
-                checked={useRealBars}
-                onChange={(e) => setUseRealBars(e.target.checked)}
-                className="accent-accent h-3.5 w-3.5 cursor-pointer"
-              />
-              <span className="select-none font-medium">Real Bars</span>
-            </label>
-            {useRealBars && (
-              <input
-                type="date"
-                value={replayFrom}
-                onChange={(e) => setReplayFrom(e.target.value)}
-                className="rounded border border-line bg-surface px-2 py-0.5 text-[11px] text-ink-1 focus:outline-none focus:ring-1 focus:ring-accent"
-                placeholder="Replay from (optional)"
-              />
-            )}
+          <div className="flex items-center gap-1.5 text-xs text-ink-2">
+            <span className="font-medium">Replay from</span>
+            <input
+              type="date"
+              value={replayFrom}
+              onChange={(e) => setReplayFrom(e.target.value)}
+              className="rounded border border-line bg-surface px-2 py-0.5 text-[11px] text-ink-1 focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+            <span className="text-ink-3">(optional)</span>
           </div>
         )}
 
@@ -597,7 +600,13 @@ export function PaperTradingPanel({
       )}
 
       {/* Empty states */}
-      {status === "idle" && !session && (
+      {restoring && !session && (
+        <div className="flex items-center justify-center gap-2 px-4 py-8 text-xs text-ink-3">
+          <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-line-strong border-t-accent" />
+          Checking for active session…
+        </div>
+      )}
+      {!restoring && status === "idle" && !session && (
         <div className="flex flex-col items-center justify-center gap-1.5 px-4 py-8 text-center">
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-accent-bg">
             <span className="text-base text-accent">◉</span>
@@ -606,7 +615,7 @@ export function PaperTradingPanel({
             Paper trading not active
           </div>
           <div className="text-[11px] text-ink-3">
-            Use synthetic bars or enable Real Bars to replay from TimescaleDB
+            Replays real candles from TimescaleDB — ingest data first if needed
           </div>
         </div>
       )}

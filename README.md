@@ -8,7 +8,7 @@ Vision: **TradingView + Hyperliquid + AI Strategy Builder**.
 - **Visual Strategy Editor**: React Flow graph editor for drag-and-drop strategy design.
 - **AI Strategy Draft**: Natural-language prompt → strategy graph (stub; LLM integration planned).
 - **Backtesting**: Historical run against real market data from Binance via CCXT, stored in TimescaleDB. Falls back to a synthetic 60-bar dataset when no real data is ingested.
-- **Paper Trading**: Live simulation (synthetic bars today; real feed in Phase 3).
+- **Paper Trading**: Poll-based replay of real TimescaleDB candles (requires ingestion).
 - **Future**: Hyperliquid native adapter, live WebSocket feed, Redis pub/sub.
 
 ## Current Milestone Status
@@ -19,10 +19,10 @@ Vision: **TradingView + Hyperliquid + AI Strategy Builder**.
 | M2 AI Strategy Draft | ✅ Done | Stub translator — always returns RSI strategy |
 | M3 Backtest (shared engine) | ✅ Done | Single engine for backtest + paper; fees, slippage, metrics |
 | M3.5 Chart Upgrade | ✅ Done | TwoPaneChart: candlestick + equity, markers, crosshair sync |
-| M4 Paper Trading | 🚧 In Progress | Synthetic bars; real feed in Phase 3 |
+| M4 Paper Trading | ✅ Done | Session lifecycle, real-bar replay, auto-resume on panel mount |
 | **M5 Real Market Data** | ✅ Done | TimescaleDB hypertable, CCXT ingestion, BacktestDataLoader |
 | **M6 Data Quality & Coverage** | ✅ Done | Funding rates, open interest, quality checker, coverage dashboard, multi-exchange |
-| **M7 Real-Bar Paper Trading** | ✅ Done | Hyperliquid native provider, WebSocket live ingestion, real-bar replay in paper trading |
+| **M7 Market Data Infra** | ✅ Done | Hyperliquid native provider, WebSocket live ingestion, CoinGlass derivatives |
 
 ## Stack
 
@@ -74,7 +74,7 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-Steps 4–5 are optional: the app falls back to a synthetic 60-bar sample if no real data is available.
+Steps 4–5 are required for paper trading and recommended for backtests; backtest falls back to a synthetic 60-bar sample if no real data is available.
 
 ## Major Routes
 
@@ -88,8 +88,8 @@ Steps 4–5 are optional: the app falls back to a synthetic 60-bar sample if no 
 ## Known Limitations
 
 - **AI strategy**: Requires `ANTHROPIC_API_KEY`; LLM output is non-deterministic (one validation retry).
-- **Paper execution on poll**: No background worker; engine advances only when the client tab is visible and polling.
-- **Real-bar replay speed**: At most 5 candles per poll (≈1 s interval) to keep the UI responsive.
+- **Paper execution on poll**: No background worker; engine advances only when the client tab is visible and polling. Replays TimescaleDB candles only — run `npm run ingest` first.
+- **Replay speed**: At most 5 candles per poll (≈1 s interval) to keep the UI responsive.
 - **Single instrument ingested by default**: Run `npm run ingest -- --symbol "ETH/USDT:USDT"` to add more.
 
 ## Roadmap

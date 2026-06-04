@@ -10,24 +10,6 @@ import { getTimescaleRepo } from "@/lib/market-data/storage/timescale.repo";
 import { resolveInstrument } from "@/lib/market-data/types";
 import type { Timeframe } from "@/lib/market-data/types";
 
-/**
- * Generate a simulated bar using random-walk from the last known price.
- * This is a placeholder until real market data feeds are integrated.
- */
-function simulateBar(lastPrice: number, timeSec: number): Bar {
-  const change = (Math.random() - 0.5) * 2 * lastPrice * 0.002; // ±0.2%
-  const close = Math.round((lastPrice + change) * 100) / 100;
-  const high = Math.max(lastPrice, close) + Math.random() * lastPrice * 0.0008;
-  const low = Math.min(lastPrice, close) - Math.random() * lastPrice * 0.0008;
-  return {
-    timeSec,
-    open: lastPrice,
-    high: Math.round(high * 100) / 100,
-    low: Math.round(low * 100) / 100,
-    close,
-  };
-}
-
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> },
@@ -67,72 +49,58 @@ export async function GET(
     : createInitialState(session.equity);
 
   const now = new Date();
-  const lastUpdate = session.updatedAt;
-  const barIntervalMs = parseTimeframeMs(session.timeframe);
 
-  // ── Determine bars to process this poll ───────────────────────────────────
-  // Real-bar mode: fetch the next N closed candles from TimescaleDB starting
-  //   from barCursor. One bar per poll so the UI updates smoothly.
-  // Synthetic mode: derive N bars from elapsed wall-clock time.
+  // ── Fetch the next batch of real candles from TimescaleDB ─────────────────
+  // Returns current snapshot unchanged if the instrument is unresolvable,
+  // the DB is unavailable, or the replay has caught up to the present.
+
+  const mapping = resolveInstrument(session.instrument);
+  if (!mapping) {
+    return NextResponse.json(toSnapshot(session as unknown as SessionRow));
+  }
 
   type RealBar = { openTime: Date; open: number; high: number; low: number; close: number };
   let realBars: RealBar[] = [];
   let newBarCursor: Date | null = session.barCursor ?? null;
 
-  if (session.useRealBars) {
-    const mapping = resolveInstrument(session.instrument);
-    if (mapping) {
-      try {
-        const repo = getTimescaleRepo();
-        // When no cursor yet, start from 90 days before session creation —
-        // matching the default ingestion window rather than querying from epoch.
-        const sessionStart = session.startedAt ?? new Date();
-        const defaultStart = new Date(sessionStart.getTime() - 90 * 24 * 3600 * 1_000);
-        const cursor = newBarCursor ?? defaultStart;
-        const candles = await repo.queryCandles({
-          exchange: mapping.exchange,
-          symbol: mapping.symbol,
-          timeframe: session.timeframe as Timeframe,
-          startTime: new Date(cursor.getTime() + 1), // strictly after cursor
-          endTime: new Date(),
-          limit: 5, // at most 5 bars per poll; keeps replay at a reasonable pace
-        });
-        realBars = candles.map((c) => ({
-          openTime: c.openTime,
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close,
-        }));
-      } catch {
-        // TimescaleDB unavailable — fall through to synthetic
-      }
-    }
-
-    if (realBars.length === 0) {
-      // No new candles available yet (caught up or DB unavailable)
-      return NextResponse.json(toSnapshot(session as unknown as SessionRow));
-    }
+  try {
+    const repo = getTimescaleRepo();
+    // Default cursor: 90 days before session creation, matching the default
+    // ingestion window so replay starts from meaningful data.
+    const sessionStart = session.startedAt ?? new Date();
+    const defaultStart = new Date(sessionStart.getTime() - 90 * 24 * 3600 * 1_000);
+    const cursor = newBarCursor ?? defaultStart;
+    const candles = await repo.queryCandles({
+      exchange: mapping.exchange,
+      symbol: mapping.symbol,
+      timeframe: session.timeframe as Timeframe,
+      startTime: new Date(cursor.getTime() + 1), // strictly after cursor
+      endTime: new Date(),
+      limit: 5, // at most 5 bars per poll; keeps replay at a reasonable pace
+    });
+    realBars = candles.map((c) => ({
+      openTime: c.openTime,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+    }));
+  } catch {
+    // TimescaleDB unavailable — nothing to replay this poll
   }
 
-  // Synthetic mode: always advance exactly 1 bar per poll so the session
-  // progresses at a steady 1 bar/s regardless of the strategy timeframe.
-  // Elapsed-time math would produce 0 bars for any timeframe longer than
-  // the 1-second poll interval, stalling the session permanently.
-  const barsToSim = session.useRealBars ? realBars.length : 1;
-
-  if (barsToSim === 0) {
+  if (realBars.length === 0) {
+    // Caught up to present or DB unavailable — return current snapshot
     return NextResponse.json(toSnapshot(session as unknown as SessionRow));
   }
 
-  // Step through bars
+  // ── Step through the fetched bars ─────────────────────────────────────────
   //
-  // Trade persistence strategy (mirrors backtest.ts lines 163-171):
+  // Trade persistence (mirrors backtest.ts):
   //   OPENED → buffer a new open record (exitTime: null).
-  //   CLOSED → first check if the matching open is in the current buffer
-  //            (same poll batch). If so, fill it in place — one complete record,
-  //            no duplicate. If not (position was opened in a previous poll),
-  //            queue a DB update for the existing open PaperTrade row.
+  //   CLOSED same-batch → fill in place — one DB record, no duplicate.
+  //   CLOSED cross-poll → update the existing open PaperTrade row by ID.
+
   type TradeData = {
     sessionId: string;
     side: string;
@@ -145,28 +113,20 @@ export async function GET(
   };
 
   const tradesToCreate: TradeData[] = [];
-  // Exit data for positions opened in a previous poll (update existing DB row)
   const prevPollCloses: Array<{ exitTime: Date; exitPrice: number; pnl: number }> = [];
 
   let lastPrice = session.lastPrice;
-  let currentTimeSec = Math.floor(lastUpdate.getTime() / 1000);
 
-  for (let i = 0; i < barsToSim; i++) {
-    let bar: Bar;
-    if (session.useRealBars && realBars[i]) {
-      const rb = realBars[i];
-      bar = {
-        timeSec: Math.floor(rb.openTime.getTime() / 1000),
-        open: rb.open,
-        high: rb.high,
-        low: rb.low,
-        close: rb.close,
-      };
-      newBarCursor = rb.openTime;
-    } else {
-      currentTimeSec += Math.floor(barIntervalMs / 1000);
-      bar = simulateBar(lastPrice, currentTimeSec);
-    }
+  for (const rb of realBars) {
+    const bar: Bar = {
+      timeSec: Math.floor(rb.openTime.getTime() / 1000),
+      open: rb.open,
+      high: rb.high,
+      low: rb.low,
+      close: rb.close,
+    };
+    newBarCursor = rb.openTime;
+
     const result = step(compiled.value, bar, engineState);
     engineState = result.state;
     lastPrice = bar.close;
@@ -184,10 +144,8 @@ export async function GET(
           pnl: 0,
         });
       } else if (evt.kind === "CLOSED") {
-        // Look for the matching open trade in the current batch first
         const openIdx = tradesToCreate.findLastIndex((t) => t.exitTime === null);
         if (openIdx >= 0) {
-          // Same-batch open+close: fill exit fields in place → single DB record
           tradesToCreate[openIdx] = {
             ...tradesToCreate[openIdx],
             exitTime: new Date(evt.timeSec * 1000),
@@ -195,7 +153,6 @@ export async function GET(
             pnl: evt.pnl,
           };
         } else {
-          // Position was opened in a previous poll — update the existing DB row
           prevPollCloses.push({
             exitTime: new Date(evt.timeSec * 1000),
             exitPrice: evt.exitPrice,
@@ -238,18 +195,12 @@ export async function GET(
   });
 
   if (updatedCount.count === 0) {
-    // Another poll already advanced it; return latest snapshot
     const latest = await prisma.paperSession.findUnique({ where: { id: sessionId } });
     return NextResponse.json(toSnapshot(latest as unknown as SessionRow));
   }
 
-  // We won the lock: persist trades.
-  // Resolve the specific ID of the pre-existing open trade (if any) so the
-  // close can be applied with a targeted update rather than the broad
-  // {sessionId, exitTime: null} predicate. The engine's no-pyramiding invariant
-  // guarantees prevPollCloses.length ≤ 1, but an ID-based update is correct
-  // regardless of that assumption and removes the latent data-loss risk if the
-  // invariant ever changes.
+  // We won the lock: persist trades. Resolve the open trade ID explicitly to
+  // avoid the broad {sessionId, exitTime: null} predicate on cross-poll closes.
   let prevOpenTradeId: string | null = null;
   if (prevPollCloses.length > 0) {
     const open = await prisma.paperTrade.findFirst({
@@ -261,9 +212,6 @@ export async function GET(
 
   if (tradesToCreate.length > 0 || (prevPollCloses.length > 0 && prevOpenTradeId != null)) {
     await prisma.$transaction([
-      // Close the prev-poll position by its specific ID.
-      // prevPollCloses always has ≤ 1 entry; the explicit [0] index makes that
-      // assumption visible rather than hiding it inside a .map().
       ...(prevPollCloses.length > 0 && prevOpenTradeId != null
         ? [prisma.paperTrade.update({
             where: { id: prevOpenTradeId },
@@ -274,25 +222,10 @@ export async function GET(
             },
           })]
         : []),
-      // Create new records (same-batch opens, or fully-closed open+close pairs).
       ...tradesToCreate.map((t) => prisma.paperTrade.create({ data: t })),
     ]);
   }
 
   const updated = await prisma.paperSession.findUnique({ where: { id: sessionId } });
   return NextResponse.json(toSnapshot(updated as unknown as SessionRow));
-}
-
-// ── Helpers ──────────────────────────────────────────────────
-
-function parseTimeframeMs(tf: string): number {
-  const match = tf.match(/^(\d+)(m|h|d)$/);
-  if (!match) return 60_000; // default 1m
-  const n = parseInt(match[1], 10);
-  switch (match[2]) {
-    case "m": return n * 60_000;
-    case "h": return n * 3_600_000;
-    case "d": return n * 86_400_000;
-    default: return 60_000;
-  }
 }

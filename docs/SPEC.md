@@ -270,9 +270,11 @@ We model a simple **signal graph**:
 - POST /api/ai/translateStrategy  (prompt -> graph JSON)
 
 ### Paper
-- POST /api/strategies/:id/paper/start
-- POST /api/strategies/:id/paper/stop
-- GET /api/paper/:runId/state
+- GET /api/strategies/:id/paper/session  (latest running/stopped session for mount resume)
+- POST /api/strategies/:id/paper/start  (body: optional `replayFrom` ISO date)
+- POST /api/paper/:sessionId/stop
+- GET /api/paper/:sessionId  (poll; advances engine when running)
+- GET /api/paper/:sessionId/trades
 
 ## 12. UI Pages (MVP)
 - /strategies

@@ -34,10 +34,11 @@
 - Crosshair sync between panes
 - Streaming mode for paper trading
 
-### Paper Trading (M4, In Progress)
+### Paper Trading (M4)
 
-- POST `/api/strategies/:id/paper/start` — create/resume session
-- GET `/api/paper/:sessionId` — advance engine (simulated bars per poll)
+- GET `/api/strategies/:id/paper/session` — mount resume (running/stopped)
+- POST `/api/strategies/:id/paper/start` — create or return running session (`replayFrom` optional)
+- GET `/api/paper/:sessionId` — advance engine (up to 5 TimescaleDB candles per poll)
 - POST stop, reset; GET trades
 - Engine: `lib/strategy/engine` (compileGraph, step)
 - Session state in DB; trades persisted
@@ -46,5 +47,5 @@
 
 - **Bars are synthetic.** `/api/strategies/:id/bars` returns random-walk OHLC. Backtest uses `SAMPLE_CANDLES` from `lib/data/candles.ts`, not the bars route.
 - **Real exchange historical data integration is pending.** No Hyperliquid, Binance, or other exchange API for bars.
-- **Paper trading uses simulated bars.** `simulateBar(lastPrice, timeSec)` — random walk; no real feed.
+- **Paper trading** replays TimescaleDB candles only; requires `npm run ingest` for the strategy instrument.
 - **Two strategy engines exist.** Backtest uses `lib/strategy/compiler`; paper uses `lib/strategy/engine`. Logic duplicated; potential divergence.

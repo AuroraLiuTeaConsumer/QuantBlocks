@@ -9,7 +9,7 @@
 | StrategyCanvas | `components/strategy/StrategyCanvas.tsx` | React Flow canvas, autosave (1.5s debounce), node types |
 | AiPromptPanel | `components/strategy/AiPromptPanel.tsx` | Textarea + Generate, validates response with Zod |
 | BacktestPanel | `components/strategy/BacktestPanel.tsx` | Run backtest, poll run, TwoPaneChart, metrics, trades table |
-| PaperTradingPanel | `components/strategy/PaperTradingPanel.tsx` | Start/Stop/Reset, poll session+trades, TwoPaneChart (streaming) |
+| PaperTradingPanel | `components/strategy/PaperTradingPanel.tsx` | Auto-resume on mount (GET paper/session), Start/Stop/Reset, replay-from date, poll session+trades, TwoPaneChart (streaming) |
 | TwoPaneChart | `components/strategy/TwoPaneChart.tsx` | Top: candlestick or price line; bottom: equity. Markers, crosshair sync |
 | StrategyChart | `components/strategy/StrategyChart.tsx` | Single-pane chart; used less than TwoPaneChart |
 | EquityChart | `components/strategy/EquityChart.tsx` | Equity-only line chart |
@@ -40,12 +40,13 @@
 
 ## Paper Trading Panel Behavior
 
-1. Click "Start" → POST `/api/strategies/:id/paper/start`
-2. Start polling: GET `/api/paper/:sessionId` (1s), GET `/api/paper/:sessionId/trades` (3s)
-3. On each session poll: `appendFromSnapshot` streams equity/price to chart
-4. On trades poll: `syncMarkersFromTrades` adds entry/exit markers
-5. Stop → POST stop; Reset → POST reset, clears chart
-6. Session state in React (`session`, `trades`); switching tabs unmounts panel, so session/trades refetched when returning (no explicit restore)
+1. **On mount**: GET `/api/strategies/:id/paper/session` — spinner while checking; if `running`, set session + start polling; if `stopped`, set session + fetch trades; 404 → idle
+2. Click "Start" → POST `/api/strategies/:id/paper/start` with optional `{ replayFrom }`
+3. While running: poll GET `/api/paper/:sessionId` (1s), GET `/api/paper/:sessionId/trades` (3s)
+4. On each session poll: `appendFromSnapshot` streams equity/price to chart
+5. On trades poll: `syncMarkersFromTrades` adds entry/exit markers
+6. Stop → POST stop; Reset → POST reset, clears chart
+7. Replay-from date picker shown when not running (no synthetic mode toggle)
 
 ## State Management Patterns
 
@@ -62,7 +63,7 @@
 
 ## Known Frontend Bugs / Risks
 
-- Switching tabs loses paper panel state; session exists in DB but UI starts fresh on return. No "resume session" UX.
+- Switching away and back re-runs mount resume (GET paper/session); chart state is not restored from prior poll buffers.
 - Backtest bars may be unavailable (`barsUnavailable`); chart shows equity only.
 - Draft apply triggers save with `initialNodes/initialEdges`; depends on sync order of `setAppliedGraph` and canvas props.
 - Chart streaming uses refs; if TwoPaneChart unmounts during poll, append calls no-op.

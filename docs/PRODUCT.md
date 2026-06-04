@@ -16,7 +16,7 @@ QuantBlocks = **TradingView + Hyperliquid + AI Strategy Builder**: visual strate
 2. **Strategy editing**: Open `/strategies/:id` → edit graph in canvas → autosave (1.5s debounce). PUT saves without server-side graph validation; incomplete graphs are OK until backtest.
 3. **AI draft**: Enter prompt in left panel → Generate → Apply or Cancel. `claude-sonnet-4-6` translates prompt; `validateGraph()` with one retry on failure.
 4. **Backtest**: Click Run Backtest → poll until complete → view metrics, equity curve, trades.
-5. **Paper trading**: Click Start → session runs; poll advances simulated bars → view stats and trades. Stop or Reset when done.
+5. **Paper trading**: Panel auto-resumes running/stopped sessions on open. Click Start (optional replay-from date) → poll replays TimescaleDB candles → view stats and trades. Stop or Reset when done.
 
 ## Milestone History
 
@@ -34,12 +34,12 @@ QuantBlocks = **TradingView + Hyperliquid + AI Strategy Builder**: visual strate
 |------|-----|---------|
 | Strategy creation | In-app "New Strategy" on `/strategies` | Instrument/timeframe picker on create |
 | Bars / backtest | TimescaleDB real candles; synthetic fallback | More instruments, longer history |
-| Paper bars | Synthetic random-walk or real-bar replay from TimescaleDB | Live Redis stream (background worker) |
+| Paper bars | TimescaleDB candle replay (5 bars/poll) | Live Redis stream (background worker) |
 | AI | Claude Sonnet graph translation | Richer prompts, templates |
 | Exchange execution | None | Hyperliquid live |
-| Session persistence | DB only | UI resume on tab switch |
+| Session persistence | DB + auto-resume on paper tab mount | Restore streamed chart buffers |
 
 ## Data Sources
 
 - **Backtest / chart bars**: `BacktestDataLoader` and bars API query TimescaleDB (CCXT-ingested); fall back to `SAMPLE_CANDLES` when coverage < 80% or DB unavailable.
-- **Paper (real-bar mode)**: Replays stored candles after `barCursor`; not a live WebSocket feed.
+- **Paper**: Replays stored candles after `barCursor`; not a live WebSocket feed. Requires ingested data for the strategy instrument.

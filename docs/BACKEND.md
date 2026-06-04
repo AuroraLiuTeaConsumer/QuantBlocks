@@ -11,7 +11,8 @@
 | DELETE | `/api/strategies/[id]` | Delete strategy |
 | GET | `/api/strategies/[id]/bars` | Real OHLC bars (TimescaleDB → synthetic fallback) |
 | POST | `/api/strategies/[id]/backtests` | Start backtest (synchronous) |
-| POST | `/api/strategies/[id]/paper/start` | Create/resume paper session |
+| GET | `/api/strategies/[id]/paper/session` | Latest running/stopped session for strategy (404 if none) |
+| POST | `/api/strategies/[id]/paper/start` | Create paper session or return existing running session |
 | GET | `/api/backtests/[runId]` | Get backtest run |
 | GET | `/api/backtests/[runId]/trades` | Get run trades |
 | GET | `/api/backtests/[runId]/export` | Download backtest as CSV (METRICS + TRADES + EQUITY_CURVE) |
@@ -184,26 +185,30 @@ Triggers `LongShortRatioIngestionService.ingest(spec)` for the given symbol + ti
 
 ## Paper Trading Flow
 
+### Resume (mount)
+
+GET `/api/strategies/:id/paper/session`  
+**Response**: SessionSnapshot (200) — most recent session with `status` in `running` | `stopped`, ordered by `updatedAt` desc  
+**404**: No such session (never started, or reset to idle)
+
 ### Start
 
 POST `/api/strategies/:id/paper/start`  
-**Body** (all optional): `{ useRealBars?: boolean, replayFrom?: ISO date string }`
+**Body** (all optional): `{ replayFrom?: ISO date string }`
 
-Creates PaperSession with `useRealBars` and `barCursor` (= `replayFrom` date, or null). Also seeds `lastPrice` from the most recent TimescaleDB candle for the strategy's instrument (falls back to 100 if unavailable).
+Creates PaperSession with `useRealBars=true` (always) and `barCursor` (= `replayFrom` date, or null). Also seeds `lastPrice` from the most recent TimescaleDB candle (falls back to 100 if unavailable).
+
+Returns existing running session unchanged. **409** if a session is already running and the body includes a different `replayFrom` (stop first).
 
 When `barCursor` is null, the poll route defaults to `session.startedAt − 90 days` as the query start, matching the default ingestion window.
 
-### Poll (synthetic mode — default)
+### Poll
 
-GET `/api/paper/:sessionId` → computes elapsed time → generates up to 10 synthetic random-walk bars → steps engine → persists trades (optimistic lock)
-
-### Poll (real-bar mode)
-
-GET `/api/paper/:sessionId` (when `useRealBars=true`):
-1. Resolves `session.instrument` → exchange + CCXT symbol via `INSTRUMENT_MAP`
+GET `/api/paper/:sessionId`:
+1. Resolves `session.instrument` → exchange + CCXT symbol via `INSTRUMENT_MAP`; returns current snapshot if unresolvable
 2. Queries TimescaleDB: `queryCandles({ startTime: barCursor + 1ms, limit: 5 })`
 3. Feeds real candles to engine; updates `barCursor` to last candle's `open_time`
-4. If no candles available (caught up or DB unavailable), returns current snapshot unchanged
+4. If no candles available (caught up, no data ingested, or DB unavailable), returns current snapshot unchanged
 
 ### Stop / Reset
 
@@ -242,7 +247,7 @@ Used in backtest route, bars route, and market-data routes.
 
 ## Known Backend Risks
 
-- Paper synthetic mode uses random-walk bars; real-bar mode replays TimescaleDB history (not a live stream).
+- Paper trading replays TimescaleDB history only (not a live stream); stalls if no candles ingested for the instrument.
 - Paper execution only on poll; no real-time advancement.
 - `fetchOpenInterestHistory` not available on all CCXT exchanges — service throws, job is marked failed.
 - No rate limiting or auth on API routes.

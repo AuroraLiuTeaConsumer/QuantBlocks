@@ -24,7 +24,7 @@ QuantBlocks is a full-stack Next.js application. Frontend and API routes run in 
 │  │             /api/market-data/{candles,ingest,coverage,jobs,      ││
 │  │                               funding-rates,open-interest,       ││
 │  │                               liquidations,long-short-ratios}    ││
-│  │             /api/strategies/:id/{bars,backtests,paper/start}     ││
+│  │             /api/strategies/:id/{bars,backtests,paper/start,session}││
 │  └─────────────────────────────────────────────────────────────────┘│
 │  ┌───────────────┐ ┌─────────────────┐ ┌──────────────────────────┐ │
 │  │ lib/strategy  │ │ lib/backtest    │ │ lib/market-data          │ │
@@ -57,7 +57,7 @@ QuantBlocks is a full-stack Next.js application. Frontend and API routes run in 
 | StrategyCanvas | `components/strategy/StrategyCanvas.tsx` | React Flow graph, autosave, node types |
 | AiPromptPanel | `components/strategy/AiPromptPanel.tsx` | AI prompt UI, calls translateStrategy |
 | BacktestPanel | `components/strategy/BacktestPanel.tsx` | Run backtest, metrics, chart, data source badge |
-| PaperTradingPanel | `components/strategy/PaperTradingPanel.tsx` | Start/stop/reset, poll session+trades, chart; Real Bars toggle + Replay From date |
+| PaperTradingPanel | `components/strategy/PaperTradingPanel.tsx` | Start/stop/reset, poll session+trades, chart; auto-resume via GET paper/session; Replay From date |
 | TwoPaneChart | `components/strategy/TwoPaneChart.tsx` | Candlestick/line + equity, markers, streaming |
 | MarketDataPage | `app/market-data/page.tsx` | Coverage dashboard: candles, funding rates, OI, liquidations, long/short ratios, jobs |
 | nodeTypes | `components/strategy/nodeTypes/` | React Flow node components per graph type |
@@ -69,7 +69,7 @@ QuantBlocks is a full-stack Next.js application. Frontend and API routes run in 
 | Strategies API | `app/api/strategies/route.ts`, `[id]/route.ts` | CRUD strategies; POST requires `name` only; PUT saves graph without validation (backtest/AI validate at run time) |
 | Bars API | `app/api/strategies/[id]/bars/route.ts` | Real candles from TimescaleDB; synthetic fallback |
 | Backtests API | `app/api/strategies/[id]/backtests/route.ts` | POST creates run; loads real candles via BacktestDataLoader |
-| Paper API | `app/api/strategies/[id]/paper/start`, `app/api/paper/[sessionId]/*` | Session lifecycle |
+| Paper API | `app/api/strategies/[id]/paper/{start,session}`, `app/api/paper/[sessionId]/*` | Session lifecycle + mount resume |
 | Market data candles | `app/api/market-data/candles/route.ts` | GET candles from TimescaleDB |
 | Market data ingest | `app/api/market-data/ingest/route.ts` | POST triggers ingestion (candle / funding_rate / open_interest) |
 | Market data coverage | `app/api/market-data/coverage/route.ts` | GET summary of all stored series |
@@ -144,7 +144,7 @@ Issues are logged as warnings but do **not** block ingestion. Aggregated `Qualit
 - **Strategy**: nodes, edges (JSON); instrument, timeframe.
 - **BacktestRun**: status, metrics, log (equityCurve, debugEvents, dataSource, dataSourceLabel, quality).
 - **Trade**: runId, side, entry/exit, qty, pnl.
-- **PaperSession**: status, engineState (JSON), equity, position, `useRealBars` (boolean), `barCursor` (DateTime? — last replayed candle open_time).
+- **PaperSession**: status, engineState (JSON), equity, position, `useRealBars` (always true on new sessions), `barCursor` (DateTime? — last replayed candle open_time).
 - **PaperTrade**: sessionId, side, qty, entry/exit, pnl.
 - **IngestionJob**: exchange, symbol, timeframe, dataType, status, rowsInserted, meta.
 - **candles** (TimescaleDB): exchange, symbol, timeframe, open_time → OHLCV.
@@ -158,8 +158,8 @@ Issues are logged as warnings but do **not** block ingestion. Aggregated `Qualit
 1. **Save**: StrategyCanvas → PUT `/api/strategies/:id` → Prisma update (no graph validation; supports incremental edits and empty canvas).
 2. **Create**: `/strategies` → POST `/api/strategies` with `{ name }` (optional empty `nodes`/`edges`) → redirect to workspace.
 3. **Backtest**: BacktestPanel → POST `/api/strategies/:id/backtests` → `validateGraph` → `BacktestDataLoader.load()` → real candles (or SAMPLE_CANDLES fallback) → `runBacktest` → trades persisted.
-4. **Paper (synthetic)**: PaperTradingPanel → POST `/api/strategies/:id/paper/start` → PaperSession; GET `/api/paper/:sessionId` generates random-walk bars per poll.
-5. **Paper (real bars)**: POST start with `{ useRealBars: true, replayFrom?: ISO }` → PaperSession with `useRealBars=true`; poll route fetches up to 5 real candles from TimescaleDB after `barCursor`; advances engine + updates cursor.
+4. **Paper resume**: PaperTradingPanel mount → GET `/api/strategies/:id/paper/session` → if running, re-attach polling; if stopped, show snapshot + trades.
+5. **Paper**: POST `/api/strategies/:id/paper/start` with optional `{ replayFrom }` → PaperSession; GET `/api/paper/:sessionId` fetches up to 5 TimescaleDB candles after `barCursor` per poll.
 
 ## Separation of Concerns
 
@@ -184,8 +184,8 @@ Issues are logged as warnings but do **not** block ingestion. Aggregated `Qualit
 
 ## Current Weak Points / Technical Debt
 
-1. **Poll-only paper advancement**: Paper trading advances only when a client polls. No background worker — if no tab is open, the session does not advance. Multiple concurrent tabs risk double-advancement (optimistic lock mitigates). Real-bar replay is fully implemented; synthetic mode is still available as a fallback.
-2. **No real-time feed**: Real-bar mode replays historical candles from TimescaleDB; it is not driven by a live stream. Phase 4 would add Redis pub/sub for true live advancement.
-3. **Session persistence**: Paper panel state resets on tab switch; session lives in DB but panel starts fresh on return (no "resume session" UX).
+1. **Poll-only paper advancement**: Paper trading advances only when a client polls. No background worker — if no tab is open, the session does not advance. Multiple concurrent tabs risk double-advancement (optimistic lock mitigates).
+2. **No real-time feed**: Paper replays historical candles from TimescaleDB; it is not driven by a live stream. Phase 4 would add Redis pub/sub for true live advancement.
+3. **Ingestion required for paper**: No synthetic fallback; sessions stall if no candles exist for the strategy instrument.
 4. **AI quality**: LLM output is non-deterministic; the retry loop handles most validation failures but exotic prompts may still return a 422.
 5. **OI availability**: `fetchOpenInterestHistory` is not supported on all CCXT exchanges; service throws and ingestion job records the failure.

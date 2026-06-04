@@ -14,7 +14,7 @@
 | 16 | Multi-exchange ingestion | ✅ Bybit + OKX in EXCHANGE_CONFIGS + INSTRUMENT_MAP entries + CLI `--exchange` flag |
 | 20 | Native Hyperliquid adapter | ✅ `NativeHyperliquidProvider` — REST candleSnapshot + fundingHistory endpoints |
 | 21 | WebSocket live candle ingestion | ✅ `ws-ingest.job.ts` — Binance USDT-M kline stream, native Node.js WebSocket, auto-reconnect |
-| 22 | Real-bar paper trading | ✅ `useRealBars` toggle on PaperSession; poll route replays TimescaleDB candles via `barCursor` |
+| 22 | Real-bar paper trading | ✅ Poll route always replays TimescaleDB candles via `barCursor`; synthetic random-walk removed; `useRealBars` always true on create |
 | 24 | CoinGlass liquidations data | ✅ `CoinGlassProvider` + `LiquidationIngestionService` + `liquidations` hypertable + GET/POST API routes + CLI + coverage dashboard section |
 | 25 | Aggregated long/short ratios across exchanges | ✅ `LongShortRatioIngestionService` + `long_short_ratios` hypertable + GET/POST API routes + CLI + coverage dashboard section |
 | 27 | CoinGlass timeframe validation gap | ✅ `isCGTimeframe()` check added before job record creation in both API route and CLI; unsupported timeframes return 400/exit(1) instead of silently falling back to `1h` |
@@ -23,6 +23,7 @@
 | 35 | Export backtest results (CSV) | ✅ Phase 5 — `GET /api/backtests/:runId/export`; CSV with METRICS, TRADES, EQUITY_CURVE sections; "Export CSV" button in BacktestPanel |
 | 7 | AI stub → real LLM | ✅ `POST /api/ai/translateStrategy` now calls `claude-sonnet-4-6`; system prompt covers all node types, handle names, and validation rules; `validateGraph()` check with one self-correction retry; requires `ANTHROPIC_API_KEY` env var |
 | 8 | Strategy creation UX | ✅ "New Strategy" button + inline name form on `/strategies` already existed; unblocked by removing `validateGraph` from POST (blank canvas is valid) and PUT (canvas saves incremental states; backtest uses `validateGraph`, paper uses `compileGraph` at run time) |
+| 6 | Session resume on tab switch | ✅ New `GET /api/strategies/:id/paper/session` returns most recent running/stopped session. `PaperTradingPanel` calls it on mount: running → resume polling; stopped → load trades. Brief spinner suppresses idle state during check. |
 
 **Phase 5 summary**: extracted `computeMetrics` into `lib/backtest/metrics.ts`; added risk-adjusted ratios (Sharpe, Sortino, Calmar) and benchmark return; added per-bar funding cost via `lib/backtest/funding.ts` with best-effort DB load; added CSV export endpoint; expanded BacktestPanel metrics grid from 6 to 10 cards; no DB/Prisma schema changes required.
 
@@ -36,7 +37,7 @@
 
 | # | Issue | Notes |
 |---|-------|-------|
-| 6 | Session resume on tab switch | Paper panel unmounts; no "resume session" UX |
+| ~~6~~ | ~~Session resume on tab switch~~ | ✅ Resolved — see Resolved table |
 | ~~7~~ | ~~AI stub~~ | ✅ Resolved — see Resolved table |
 | ~~8~~ | ~~Strategy creation UX~~ | ✅ Resolved — see Resolved table |
 | 9 | Optimistic lock retry | Paper session update can fail; no retry on conflict |

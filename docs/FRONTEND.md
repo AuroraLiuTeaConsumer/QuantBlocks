@@ -64,6 +64,7 @@
 ## Known Frontend Bugs / Risks
 
 - Switching away and back re-runs mount resume (GET paper/session); chart state is not restored from prior poll buffers.
+- Multiple tabs polling the same session rely on server-side lock retries; occasional poll may return a slightly stale snapshot until the next interval.
 - Backtest bars may be unavailable (`barsUnavailable`); chart shows equity only.
 - Draft apply triggers save with `initialNodes/initialEdges`; depends on sync order of `setAppliedGraph` and canvas props.
 - Chart streaming uses refs; if TwoPaneChart unmounts during poll, append calls no-op.

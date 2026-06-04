@@ -53,7 +53,7 @@ The project is in a clean, passing state. `npx tsc --noEmit` is clean. All 25 te
 - `data-loader.ts` — `BacktestDataLoader` queries TimescaleDB; falls back to SAMPLE_CANDLES at <80% coverage
 
 ### Paper Trading (`src/lib/paper/engine.ts`, `src/app/api/paper/`)
-- `PaperSession` in Prisma; poll route advances engine per GET; optimistic lock on update
+- `PaperSession` in Prisma; poll route advances engine per GET; optimistic lock with up to 3 retries on collision (re-fetch session + replay from updated `barCursor`)
 - Real-bar replay only from TimescaleDB via `barCursor` (synthetic random-walk removed); `useRealBars` always true on new sessions
 - Mount resume: GET `/api/strategies/:id/paper/session` + `PaperTradingPanel` restores running/stopped sessions on load
 - `barCursor` defaults to `session.startedAt − 90 days` (not epoch) when null
@@ -138,7 +138,7 @@ scripts/setup-timescale.ts             # Runs all db/migrations/timescale/*.sql 
 | `src/lib/market-data/storage/timescale.repo.ts` | All TimescaleDB reads/writes; singleton via `getTimescaleRepo()` |
 | `src/lib/market-data/types.ts` | All domain types + `INSTRUMENT_MAP` + `TIMEFRAME_MS` |
 | `src/app/api/strategies/[id]/backtests/route.ts` | Loads candles + funding rates; calls `runBacktest`; persists result |
-| `src/app/api/paper/[sessionId]/route.ts` | Poll route; advances engine; optimistic lock; real-bar cursor advancement |
+| `src/app/api/paper/[sessionId]/route.ts` | Poll route; real-bar replay; optimistic lock with `MAX_RETRIES=3`; cross-poll closes update open trade by ID |
 | `src/app/api/strategies/[id]/paper/session/route.ts` | GET latest running/stopped session for mount resume |
 | `src/app/api/strategies/[id]/paper/start/route.ts` | Creates PaperSession (always real bars); returns existing running session |
 | `src/components/strategy/BacktestPanel.tsx` | 10-card metrics grid; Export CSV button; equity chart |
@@ -157,7 +157,7 @@ scripts/setup-timescale.ts             # Runs all db/migrations/timescale/*.sql 
 | ~~6~~ | ~~Session resume on tab switch~~ | ✅ Resolved — GET `/api/strategies/:id/paper/session` + panel mount restore |
 | ~~7~~ | ~~AI stub~~ | ✅ Resolved — `POST /api/ai/translateStrategy` now calls `claude-sonnet-4-6`; one self-correction retry; requires `ANTHROPIC_API_KEY` |
 | ~~8~~ | ~~Strategy creation UX~~ | ✅ Resolved — `/strategies` "New Strategy" button + name form; POST/PUT allow empty/incremental graphs |
-| 9 | Optimistic lock retry | Paper session update can fail silently on concurrent polls |
+| ~~9~~ | ~~Optimistic lock retry~~ | ✅ Resolved — poll route retries up to 3× on `updateMany` collision |
 | 10 | No auth / rate limiting | All API routes are unprotected |
 | 17 | OI availability | `fetchOpenInterestHistory` not supported on all CCXT exchanges |
 | 18 | Coverage dashboard refresh | Static server render; requires manual reload |
@@ -237,9 +237,7 @@ npm run ws:ingest -- --symbols BTCUSDT,ETHUSDT --timeframe 1m
 
 All MVP phases are complete. The highest-value open items are:
 
-**Item #9 — Optimistic lock retry**: The paper session poll update (`GET /api/paper/:sessionId`) can silently lose an update when two concurrent polls collide. Add a retry loop (≤3 attempts) around the Prisma update.
-
-See `docs/TODO.md` for the full prioritised backlog.
+See `docs/TODO.md` for the full prioritised backlog. Highest-value open items: auth/rate limiting (#10), error boundaries (#11), quality report in BacktestPanel (#19).
 
 ---
 

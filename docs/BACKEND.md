@@ -205,10 +205,11 @@ When `barCursor` is null, the poll route defaults to `session.startedAt − 90 d
 ### Poll
 
 GET `/api/paper/:sessionId`:
-1. Resolves `session.instrument` → exchange + CCXT symbol via `INSTRUMENT_MAP`; returns current snapshot if unresolvable
+1. Resolves `session.instrument` → exchange + CCXT symbol via `INSTRUMENT_MAP`; returns current snapshot if unresolvable or invalid timeframe
 2. Queries TimescaleDB: `queryCandles({ startTime: barCursor + 1ms, limit: 5 })`
-3. Feeds real candles to engine; updates `barCursor` to last candle's `open_time`
-4. If no candles available (caught up, no data ingested, or DB unavailable), returns current snapshot unchanged
+3. Steps engine through returned candles; persists trades (cross-poll closes update open row by ID)
+4. **Optimistic lock**: `updateMany({ id, updatedAt })` — on collision, re-fetch session and retry up to 3 times (replay from winner's `barCursor`); if all retries fail, return latest DB snapshot (client retries on next 1s poll)
+5. If no candles available (caught up, no data ingested, or DB unavailable), returns current snapshot unchanged
 
 ### Stop / Reset
 

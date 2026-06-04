@@ -24,6 +24,7 @@
 | 7 | AI stub → real LLM | ✅ `POST /api/ai/translateStrategy` now calls `claude-sonnet-4-6`; system prompt covers all node types, handle names, and validation rules; `validateGraph()` check with one self-correction retry; requires `ANTHROPIC_API_KEY` env var |
 | 8 | Strategy creation UX | ✅ "New Strategy" button + inline name form on `/strategies` already existed; unblocked by removing `validateGraph` from POST (blank canvas is valid) and PUT (canvas saves incremental states; backtest uses `validateGraph`, paper uses `compileGraph` at run time) |
 | 6 | Session resume on tab switch | ✅ New `GET /api/strategies/:id/paper/session` returns most recent running/stopped session. `PaperTradingPanel` calls it on mount: running → resume polling; stopped → load trades. Brief spinner suppresses idle state during check. |
+| 9 | Optimistic lock retry | ✅ `GET /api/paper/:sessionId` now retries up to 3 times on lock collision: re-fetches the session (fresh `updatedAt` + `barCursor`), replays bars from the new cursor, retries the `updateMany`. After all retries exhausted returns the latest DB snapshot; client retries on the next 1s poll interval. |
 
 **Phase 5 summary**: extracted `computeMetrics` into `lib/backtest/metrics.ts`; added risk-adjusted ratios (Sharpe, Sortino, Calmar) and benchmark return; added per-bar funding cost via `lib/backtest/funding.ts` with best-effort DB load; added CSV export endpoint; expanded BacktestPanel metrics grid from 6 to 10 cards; no DB/Prisma schema changes required.
 
@@ -40,7 +41,7 @@
 | ~~6~~ | ~~Session resume on tab switch~~ | ✅ Resolved — see Resolved table |
 | ~~7~~ | ~~AI stub~~ | ✅ Resolved — see Resolved table |
 | ~~8~~ | ~~Strategy creation UX~~ | ✅ Resolved — see Resolved table |
-| 9 | Optimistic lock retry | Paper session update can fail; no retry on conflict |
+| ~~9~~ | ~~Optimistic lock retry~~ | ✅ Resolved — see Resolved table |
 | 10 | Auth / rate limiting | API routes unprotected |
 | 11 | Error boundaries | Unhandled errors can blank page |
 | 17 | OI availability | `fetchOpenInterestHistory` not supported on all CCXT exchanges; job records failure |

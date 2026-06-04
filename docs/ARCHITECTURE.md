@@ -184,7 +184,7 @@ Issues are logged as warnings but do **not** block ingestion. Aggregated `Qualit
 
 ## Current Weak Points / Technical Debt
 
-1. **Poll-only paper advancement**: Paper trading advances only when a client polls. No background worker — if no tab is open, the session does not advance. Multiple concurrent tabs risk double-advancement (optimistic lock mitigates).
+1. **Poll-only paper advancement**: Paper trading advances only when a client polls. No background worker — if no tab is open, the session does not advance. Concurrent tabs use optimistic locking with up to 3 server-side retries per poll.
 2. **No real-time feed**: Paper replays historical candles from TimescaleDB; it is not driven by a live stream. Phase 4 would add Redis pub/sub for true live advancement.
 3. **Ingestion required for paper**: No synthetic fallback; sessions stall if no candles exist for the strategy instrument.
 4. **AI quality**: LLM output is non-deterministic; the retry loop handles most validation failures but exotic prompts may still return a 422.

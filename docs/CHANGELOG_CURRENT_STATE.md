@@ -38,7 +38,7 @@
 
 - GET `/api/strategies/:id/paper/session` — mount resume (running/stopped)
 - POST `/api/strategies/:id/paper/start` — create or return running session (`replayFrom` optional)
-- GET `/api/paper/:sessionId` — advance engine (up to 5 TimescaleDB candles per poll)
+- GET `/api/paper/:sessionId` — advance engine (up to 5 TimescaleDB candles per poll); optimistic lock with 3 retries on collision
 - POST stop, reset; GET trades
 - Engine: `lib/strategy/engine` (compileGraph, step)
 - Session state in DB; trades persisted

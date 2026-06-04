@@ -54,6 +54,13 @@ The PaperTradingPanel header shows:
 
 Paper sessions inherit `instrument` and `timeframe` from the strategy. The poll route resolves via `INSTRUMENT_MAP` (e.g. `BTC-PERP` → Binance `BTC/USDT:USDT`). If the instrument is unmapped or has no TimescaleDB data, the poll returns the current snapshot unchanged (session stalls until data is ingested).
 
+## Concurrency
+
+Concurrent polls (e.g. multiple browser tabs) use an optimistic lock on `PaperSession.updatedAt`:
+- Winner persists engine state, `barCursor`, and trades.
+- Loser re-fetches the session and retries up to **3** times, replaying the next candle batch from the updated cursor.
+- After 3 failed attempts, the route returns the latest DB snapshot; the client picks up on the next 1s poll.
+
 ## In-Memory Limitations
 
 - Execution is **not** continuous; it advances only when a client polls
@@ -66,4 +73,4 @@ Paper sessions inherit `instrument` and `timeframe` from the strategy. The poll 
 Trade deduplication:
 - `OPENED` → buffer new record (exitTime=null)
 - `CLOSED` same-batch → fill in-place (one DB record)
-- `CLOSED` cross-poll → `updateMany({ where: { sessionId, exitTime: null } })`
+- `CLOSED` cross-poll → `findFirst` open trade by ID, then `update` that row

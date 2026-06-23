@@ -58,6 +58,7 @@ export type TwoPaneChartHandle = {
   appendEquity: (point: EquityPoint) => void;
   appendPrice: (point: PricePoint) => void;
   appendBar: (bar: BarItem) => void;
+  initBars: (bars: BarItem[]) => void;
   setMarkers: (markers: ChartMarker[]) => void;
   reset: () => void;
 };
@@ -186,11 +187,11 @@ export const TwoPaneChart = forwardRef(function TwoPaneChart(
     });
     topChartRef.current = topChart;
 
-    // Decide which series on top pane
-    const hasBars = bars != null && bars.length > 0;
+    // Top pane: candlestick for backtest (static bars) and paper (streaming).
+    // Line series is kept only for non-streaming charts with no OHLC data.
+    const useCandlestick = (bars != null && bars.length > 0) || streaming;
 
-    if (hasBars) {
-      // Candlestick for backtest (or paper with real bars in future)
+    if (useCandlestick) {
       const cs = topChart.addSeries(CandlestickSeries, {
         upColor: "#22c55e",
         downColor: "#ef4444",
@@ -200,38 +201,33 @@ export const TwoPaneChart = forwardRef(function TwoPaneChart(
       });
       candlestickRef.current = cs;
 
-      const sorted = [...bars!].sort((a, b) => a.time - b.time);
-      cs.setData(
-        sorted.map((b) => ({
-          time: b.time as Time,
-          open: b.open,
-          high: b.high,
-          low: b.low,
-          close: b.close,
-        })),
-      );
+      if (bars && bars.length > 0) {
+        const sorted = [...bars].sort((a, b) => a.time - b.time);
+        cs.setData(
+          sorted.map((b) => ({
+            time: b.time as Time,
+            open: b.open,
+            high: b.high,
+            low: b.low,
+            close: b.close,
+          })),
+        );
+      }
 
-      // Trade markers on candlestick
       if (trades && trades.length > 0) {
-        const plugin = createSeriesMarkers(cs, buildMarkers(trades));
-        markersPluginRef.current = plugin;
+        markersPluginRef.current = createSeriesMarkers(cs, buildMarkers(trades));
       } else {
-        // Empty plugin for streaming markers later
-        const plugin = createSeriesMarkers(cs, []);
-        markersPluginRef.current = plugin;
+        markersPluginRef.current = createSeriesMarkers(cs, []);
       }
     } else {
-      // Line series for price (paper trading — no OHLC bars yet)
+      // Line series — only for non-streaming charts with no OHLC data
       const ls = topChart.addSeries(LineSeries, {
         color: "#60a5fa",
         lineWidth: 2,
         priceFormat: { type: "price", precision: 4, minMove: 0.0001 },
       });
       priceLineRef.current = ls;
-
-      // Empty markers plugin on line series
-      const plugin = createSeriesMarkers(ls, []);
-      markersPluginRef.current = plugin;
+      markersPluginRef.current = createSeriesMarkers(ls, []);
     }
 
     // ─ Bottom chart (equity) ─────────────────────────────
@@ -380,6 +376,22 @@ export const TwoPaneChart = forwardRef(function TwoPaneChart(
         close: bar.close,
       });
       topChartRef.current?.timeScale().scrollToRealTime();
+    },
+
+    initBars(bars: BarItem[]) {
+      const series = candlestickRef.current;
+      if (!series) return;
+      const sorted = [...bars].sort((a, b) => a.time - b.time);
+      series.setData(
+        sorted.map((b) => ({
+          time: b.time as Time,
+          open: b.open,
+          high: b.high,
+          low: b.low,
+          close: b.close,
+        })),
+      );
+      topChartRef.current?.timeScale().fitContent();
     },
 
     setMarkers(markers: ChartMarker[]) {

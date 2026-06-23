@@ -158,6 +158,7 @@ export async function GET(
     const tradesToCreate: TradeData[] = [];
     const prevPollCloses: Array<{ exitTime: Date; exitPrice: number; pnl: number }> = [];
     let lastPrice = cur.lastPrice;
+    let lastBar: { time: number; open: number; high: number; low: number; close: number } | null = null;
 
     for (const rb of realBars) {
       const bar: Bar = {
@@ -168,6 +169,7 @@ export async function GET(
         close: rb.close,
       };
       newBarCursor = rb.openTime;
+      lastBar = { time: bar.timeSec, open: rb.open, high: rb.high, low: rb.low, close: rb.close };
 
       const result = step(compiled.value, bar, engineState);
       engineState = result.state;
@@ -276,7 +278,8 @@ export async function GET(
     if (!updated) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
-    return NextResponse.json(toSnapshot(updated as unknown as SessionRow));
+    const snap = toSnapshot(updated as unknown as SessionRow);
+    return NextResponse.json(lastBar ? { ...snap, lastBar } : snap);
   }
 
   // ── All retries exhausted ─────────────────────────────────────────────────

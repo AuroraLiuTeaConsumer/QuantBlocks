@@ -5,6 +5,7 @@ import {
   TwoPaneChart,
   type TwoPaneChartHandle,
   type ChartMarker,
+  type BarItem,
 } from "./TwoPaneChart";
 
 const POLL_SESSION_MS = 1000;
@@ -31,6 +32,7 @@ type SessionSnapshot = {
   barCursor: string | null;
   startedAt: string | null;
   updatedAt: string;
+  lastBar?: { time: number; open: number; high: number; low: number; close: number };
 };
 
 type PaperTrade = {
@@ -141,14 +143,31 @@ export function PaperTradingPanel({
   const appendFromSnapshot = useCallback((snap: SessionSnapshot) => {
     const chart = chartRef.current;
     if (!chart) return;
-    // Real-bar replay: use the actual historical candle timestamp from barCursor
-    // so the x-axis shows the replayed date, not today's wall-clock time.
-    // Synthetic mode has no barCursor so we fall back to wall-clock.
-    const time = snap.barCursor ? toUTCSec(snap.barCursor) : toUTCSec(snap.updatedAt);
+    const time = snap.lastBar?.time ?? (snap.barCursor ? toUTCSec(snap.barCursor) : toUTCSec(snap.updatedAt));
     if (time > lastEquityTimeRef.current) {
       chart.appendEquity({ time, value: snap.equity });
-      chart.appendPrice({ time, value: snap.lastPrice });
+      if (snap.lastBar) {
+        chart.appendBar(snap.lastBar);
+      } else {
+        // Fallback synthetic candle when poll response has no OHLC (e.g. stale session restore)
+        chart.appendBar({ time, open: snap.lastPrice, high: snap.lastPrice, low: snap.lastPrice, close: snap.lastPrice });
+      }
       lastEquityTimeRef.current = time;
+    }
+  }, []);
+
+  const fetchAndSeedBars = useCallback(async (stratId: string, timeframe: string) => {
+    try {
+      const res = await fetch(
+        `/api/strategies/${stratId}/bars?timeframe=${encodeURIComponent(timeframe)}&limit=500`,
+      );
+      if (!res.ok || !mountedRef.current) return;
+      const data = await res.json();
+      if (Array.isArray(data) && mountedRef.current) {
+        chartRef.current?.initBars(data as BarItem[]);
+      }
+    } catch {
+      // bars are optional context — proceed without
     }
   }, []);
 
@@ -272,13 +291,14 @@ export function PaperTradingPanel({
         if (cancelled) return;
         setSession(snap);
         pollTrades(snap.id);
+        fetchAndSeedBars(snap.strategyId, snap.timeframe);
         if (snap.status === "running") startPolling(snap.id);
         setRestoring(false);
       })
       .catch(() => { if (!cancelled) setRestoring(false); });
 
     return () => { cancelled = true; };
-  }, [strategyId, startPolling, pollTrades]);
+  }, [strategyId, startPolling, pollTrades, fetchAndSeedBars]);
 
   const handleStart = async () => {
     setError(null);
@@ -330,6 +350,7 @@ export function PaperTradingPanel({
       setTrades([]);
       setLoading(false);
       appendFromSnapshot(snap);
+      fetchAndSeedBars(strategyId, snap.timeframe);
       if (snap.status === "running") startPolling(snap.id);
     } catch (err) {
       if (mountedRef.current) {

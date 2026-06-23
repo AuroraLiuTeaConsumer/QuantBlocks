@@ -55,11 +55,20 @@ export class OpenInterestIngestionService {
     // ON CONFLICT DO NOTHING makes repeated calls safe.
     await rateLimiter.throttle();
 
-    const rows = await fetchWithRetry(
-      () => provider.fetchOpenInterest(symbol, timeframe as Timeframe, cursor, PAGE_SIZE),
-      MAX_RETRIES,
-      log,
-    );
+    let rows: import("../types").OpenInterest[];
+    try {
+      rows = await fetchWithRetry(
+        () => provider.fetchOpenInterest(symbol, timeframe as Timeframe, cursor, PAGE_SIZE),
+        MAX_RETRIES,
+        log,
+      );
+    } catch (err) {
+      if (isUnsupportedError(err)) {
+        log(`  ${exchange} does not support OI history — 0 rows inserted.`);
+        return { rowsInserted: 0, gapsFilled: 0, durationMs: Date.now() - t0 };
+      }
+      throw err;
+    }
 
     if (rows.length === 0) {
       log("  No OI data returned from exchange.");
@@ -89,6 +98,15 @@ export class OpenInterestIngestionService {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/**
+ * Returns true for errors that indicate a permanent capability gap on the
+ * exchange (e.g. "bybit does not support fetchOpenInterestHistory").
+ * These must not be retried — the outcome won't change on the next attempt.
+ */
+function isUnsupportedError(err: unknown): boolean {
+  return err instanceof Error && err.message.includes("does not support");
+}
+
 async function fetchWithRetry<T>(
   fn: () => Promise<T>,
   maxRetries: number,
@@ -100,6 +118,9 @@ async function fetchWithRetry<T>(
     try {
       return await fn();
     } catch (err) {
+      // Permanent errors — rethrow immediately, no retry
+      if (isUnsupportedError(err)) throw err;
+
       lastErr = err;
       const msg = err instanceof Error ? err.message : String(err);
       const delayMs = Math.pow(2, attempt) * 1_000;

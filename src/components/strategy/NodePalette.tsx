@@ -34,7 +34,14 @@ const CATEGORIES: Category[] = [
     colorVar: "var(--purple)",
     colorBgVar: "var(--purple-bg)",
     nodes: [
-      { type: "rsi", label: "RSI", desc: "Relative Strength", defaultData: { period: 14 }, icon: "~" },
+      {
+        type: "indicator",
+        label: "Indicator",
+        desc: "SMA, EMA, RSI, MACD…",
+        defaultData: { indicatorId: "sma", params: { period: 20, field: "close" }, indicatorName: "SMA" },
+        icon: "∿",
+      },
+      { type: "rsi", label: "RSI (legacy)", desc: "Relative Strength", defaultData: { period: 14 }, icon: "~" },
       { type: "constant", label: "Constant", desc: "Fixed value", defaultData: { value: 0 }, icon: "#" },
     ],
   },

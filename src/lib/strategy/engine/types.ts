@@ -93,6 +93,8 @@ export interface EngineState {
   /** Indicator states keyed by nodeId */
   indicators: {
     rsi: Record<string, RsiState>;
+    /** Opaque state for registry-based "indicator" nodes, keyed by nodeId. */
+    generic: Record<string, unknown>;
   };
   /** Trading position state */
   position: PositionState | null;

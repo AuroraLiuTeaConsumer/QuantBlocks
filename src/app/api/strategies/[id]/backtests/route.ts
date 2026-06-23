@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { validateGraph } from "@/lib/strategy/validator";
 import { runBacktest, DEFAULT_CONFIG } from "@/lib/backtest/backtest";
-import { SAMPLE_CANDLES } from "@/lib/data/candles";
 import type { StrategyGraph } from "@/lib/strategy/graphTypes";
 import {
   getBacktestDataLoader,
   InsufficientDataError,
 } from "@/lib/backtest/data-loader";
+import { HistoricalDataIngestionService } from "@/lib/market-data/ingestion/historical-service";
 import {
   resolveInstrument,
   isTimeframe,
@@ -57,75 +57,100 @@ export async function POST(
     // No body / invalid JSON — use defaults
   }
 
-  // ── Resolve candle data source ──────────────────────────────────────────
-  // Priority: TimescaleDB real data → SAMPLE_CANDLES fallback.
-  // The strategy's instrument and timeframe drive the TimescaleDB query.
-
-  let candles: BacktestCandle[] = SAMPLE_CANDLES;
-  let dataSource: "real" | "sample" = "sample";
-  let dataSourceLabel = "Sample (synthetic 60-bar dataset)";
-  let fundingRates: FundingRate[] = [];
-  let timeframeMs: number | undefined;
+  // ── Resolve instrument ──────────────────────────────────────────────────
 
   const mapping = resolveInstrument(strategy.instrument);
   const tf = isTimeframe(strategy.timeframe) ? strategy.timeframe : null;
 
-  if (mapping && tf) {
-    const endTime = bodyEndTime ?? new Date();
-    const startTime = bodyStartTime ?? new Date(endTime.getTime() - 90 * 24 * 3600 * 1_000);
-    timeframeMs = TIMEFRAME_MS[tf];
+  if (!mapping || !tf) {
+    return NextResponse.json(
+      {
+        error: `Cannot resolve instrument "${strategy.instrument}" or timeframe "${strategy.timeframe}". Update the strategy settings.`,
+      },
+      { status: 422 },
+    );
+  }
+
+  const endTime = bodyEndTime ?? new Date();
+  const startTime = bodyStartTime ?? new Date(endTime.getTime() - 90 * 24 * 3600 * 1_000);
+  const timeframeMs = TIMEFRAME_MS[tf];
+
+  // ── Load candles — auto-ingest the window if coverage is insufficient ────
+
+  let candles: BacktestCandle[];
+  let dataSourceLabel: string;
+  let fundingRates: FundingRate[] = [];
+
+  try {
+    const loader = getBacktestDataLoader();
+    let dataset: Awaited<ReturnType<typeof loader.load>>;
+    let autoIngested = false;
 
     try {
-      const loader = getBacktestDataLoader();
-      const dataset = await loader.load({
+      dataset = await loader.load({
         exchange: mapping.exchange,
         symbol: mapping.symbol,
         timeframe: tf,
         startTime,
         endTime,
       });
+    } catch (loadErr) {
+      if (!(loadErr instanceof InsufficientDataError)) throw loadErr;
 
-      candles = dataset.candles;
-      dataSource = "real";
-      dataSourceLabel =
-        `${mapping.exchange} ${mapping.symbol} ${tf} ` +
-        `(${dataset.candleCount} bars, ${dataset.coveragePct.toFixed(1)}% coverage)`;
+      // Coverage insufficient — fetch missing candles from exchange then retry
+      console.log(
+        `[backtest] ${loadErr.coveragePct.toFixed(1)}% coverage for ` +
+          `${mapping.exchange} ${mapping.symbol} ${tf} — auto-ingesting…`,
+      );
+      const ingestService = new HistoricalDataIngestionService();
+      await ingestService.ingest(
+        { exchange: mapping.exchange, symbol: mapping.symbol, timeframe: tf, startTime, endTime },
+        (msg) => console.log(`[backtest ingest] ${msg}`),
+      );
+      autoIngested = true;
 
-      // Load funding rates for the same window (best-effort — silently skip if unavailable)
-      try {
-        const repo = getTimescaleRepo();
-        fundingRates = await repo.queryFundingRates({
-          exchange: mapping.exchange,
-          symbol: mapping.symbol,
-          startTime,
-          endTime,
-        });
-      } catch {
-        // Funding rates are optional; proceed without them
-      }
-    } catch (err) {
-      if (err instanceof InsufficientDataError) {
-        // Not enough real data — fall back gracefully with a clear log message
-        console.warn(
-          `[backtest] Insufficient data for ${mapping.exchange} ${mapping.symbol}: ` +
-            `${err.coveragePct.toFixed(1)}% coverage. Falling back to sample data.`,
-        );
-      } else {
-        // Unexpected error (DB unreachable, etc.) — fall back, don't crash
-        console.error("[backtest] Data loader error:", err);
-      }
-      // candles stays as SAMPLE_CANDLES
+      // One retry after ingest
+      dataset = await loader.load({
+        exchange: mapping.exchange,
+        symbol: mapping.symbol,
+        timeframe: tf,
+        startTime,
+        endTime,
+      });
     }
+
+    candles = dataset.candles;
+    dataSourceLabel =
+      `${mapping.exchange} ${mapping.symbol} ${tf} ` +
+      `(${dataset.candleCount} bars, ${dataset.coveragePct.toFixed(1)}% coverage` +
+      `${autoIngested ? ", auto-ingested" : ""})`;
+
+    // Funding rates — best-effort, proceed without if unavailable
+    try {
+      const repo = getTimescaleRepo();
+      fundingRates = await repo.queryFundingRates({
+        exchange: mapping.exchange,
+        symbol: mapping.symbol,
+        startTime,
+        endTime,
+      });
+    } catch {
+      /* optional */
+    }
+  } catch (err) {
+    const message =
+      err instanceof InsufficientDataError
+        ? `Not enough data after auto-ingest: ${err.coveragePct.toFixed(1)}% coverage ` +
+          `(${err.found}/${err.expected} candles). ` +
+          `The exchange may not have data for this period — try a different date range.`
+        : `Failed to load market data: ${err instanceof Error ? err.message : String(err)}`;
+    return NextResponse.json({ error: message }, { status: 422 });
   }
 
   // ── Determine time range for the run record ─────────────────────────────
 
-  const runStartTime =
-    candles.length > 0 ? candles[0].time : SAMPLE_CANDLES[0].time;
-  const runEndTime =
-    candles.length > 0
-      ? candles[candles.length - 1].time
-      : SAMPLE_CANDLES[SAMPLE_CANDLES.length - 1].time;
+  const runStartTime = candles[0].time;
+  const runEndTime = candles[candles.length - 1].time;
 
   // ── Create run record ───────────────────────────────────────────────────
 
@@ -172,7 +197,7 @@ export async function POST(
             equityCurve: result.equityCurve,
             initialCapital: config.initialCapital,
             // Data source metadata — consumed by BacktestPanel
-            dataSource,
+            dataSource: "real",
             dataSourceLabel,
             fundingRatesLoaded: fundingRates.length,
           }),

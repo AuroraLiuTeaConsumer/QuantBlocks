@@ -56,6 +56,12 @@ export const SetRiskNodeData = z.object({
   tpPct: z.number().optional(),
 });
 
+export const IndicatorNodeData = z.object({
+  indicatorId: z.string(),
+  params: z.record(z.union([z.number(), z.string()])).default({}),
+  indicatorName: z.string().optional(),
+});
+
 // ---------------------------------------------------------------------------
 // Allowed node types
 // ---------------------------------------------------------------------------
@@ -73,6 +79,7 @@ export const NODE_TYPES = [
   "open_position",
   "close_position",
   "set_risk",
+  "indicator",
 ] as const;
 
 export type NodeType = (typeof NODE_TYPES)[number];
@@ -90,13 +97,14 @@ export const NodeDataSchemas: Record<NodeType, z.ZodTypeAny> = {
   open_position: OpenPositionNodeData,
   close_position: ClosePositionNodeData,
   set_risk: SetRiskNodeData,
+  indicator: IndicatorNodeData,
 };
 
 // ---------------------------------------------------------------------------
 // Category helpers
 // ---------------------------------------------------------------------------
 
-export const DATA_NODE_TYPES: NodeType[] = ["price", "volume", "rsi", "constant"];
+export const DATA_NODE_TYPES: NodeType[] = ["price", "volume", "rsi", "constant", "indicator"];
 export const LOGIC_NODE_TYPES: NodeType[] = ["compare", "cross", "and", "or", "not"];
 export const ACTION_NODE_TYPES: NodeType[] = ["open_position", "close_position", "set_risk"];
 
@@ -122,6 +130,7 @@ export const StrategyNodeSchema = z.discriminatedUnion("type", [
   BaseNode.extend({ type: z.literal("open_position"), data: OpenPositionNodeData }),
   BaseNode.extend({ type: z.literal("close_position"), data: ClosePositionNodeData }),
   BaseNode.extend({ type: z.literal("set_risk"), data: SetRiskNodeData }),
+  BaseNode.extend({ type: z.literal("indicator"), data: IndicatorNodeData }),
 ]);
 
 

@@ -148,6 +148,16 @@ function toChartEquity(
     .filter((p) => Number.isFinite(p.time) && Number.isFinite(p.value));
 }
 
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function daysAgoStr(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
 export function BacktestPanel({
   strategyId,
   strategyTimeframe = "1h",
@@ -166,6 +176,8 @@ export function BacktestPanel({
   const [barsUnavailable, setBarsUnavailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dataSourceLabel, setDataSourceLabel] = useState<string | null>(null);
+  const [fromDate, setFromDate] = useState(() => daysAgoStr(90));
+  const [toDate, setToDate] = useState(() => todayStr());
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
   const strategyIdRef = useRef(strategyId);
@@ -316,10 +328,19 @@ export function BacktestPanel({
     setStatus("running");
 
     try {
+      const body: Record<string, string> = {};
+      if (fromDate) body.startTime = new Date(fromDate).toISOString();
+      if (toDate) {
+        // include the full end day by moving to end-of-day
+        const end = new Date(toDate);
+        end.setDate(end.getDate() + 1);
+        body.endTime = end.toISOString();
+      }
+
       const res = await fetch(`/api/strategies/${strategyId}/backtests`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(body),
       });
       const data = (await res.json()) as BacktestRun & {
         error?: string;
@@ -429,6 +450,30 @@ export function BacktestPanel({
           )}
         </div>
         <div className="flex items-center gap-2">
+          {/* Date range */}
+          <div className="flex items-center gap-1.5 text-[11px] text-ink-2">
+            <span className="font-medium text-ink-3">From</span>
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              disabled={status === "running"}
+              max={toDate || undefined}
+              className="rounded border border-line bg-surface px-1.5 py-0.5 text-[11px] text-ink-1 focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
+            />
+            <span className="font-medium text-ink-3">To</span>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              disabled={status === "running"}
+              min={fromDate || undefined}
+              className="rounded border border-line bg-surface px-1.5 py-0.5 text-[11px] text-ink-1 focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
+            />
+          </div>
+
+          <div className="h-4 w-px bg-line" />
+
           {status === "success" && runId && (
             <a
               href={`/api/backtests/${runId}/export`}

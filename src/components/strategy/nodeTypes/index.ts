@@ -11,6 +11,7 @@ import { NotNode } from "./NotNode";
 import { OpenPositionNode } from "./OpenPositionNode";
 import { ClosePositionNode } from "./ClosePositionNode";
 import { SetRiskNode } from "./SetRiskNode";
+import { IndicatorNode } from "./IndicatorNode";
 
 export const strategyNodeTypes: NodeTypes = {
   price: PriceNode,
@@ -25,6 +26,7 @@ export const strategyNodeTypes: NodeTypes = {
   open_position: OpenPositionNode,
   close_position: ClosePositionNode,
   set_risk: SetRiskNode,
+  indicator: IndicatorNode,
 };
 
-export { PriceNode, VolumeNode, RsiNode, ConstantNode, CompareNode, CrossNode, AndNode, OrNode, NotNode, OpenPositionNode, ClosePositionNode, SetRiskNode };
+export { PriceNode, VolumeNode, RsiNode, ConstantNode, CompareNode, CrossNode, AndNode, OrNode, NotNode, OpenPositionNode, ClosePositionNode, SetRiskNode, IndicatorNode };

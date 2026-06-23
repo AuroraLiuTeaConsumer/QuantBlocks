@@ -15,6 +15,8 @@ import type {
   StepResult,
 } from "./types";
 import { createRsiState, stepRsi } from "./indicators/rsi";
+import { indicatorRegistry } from "../../indicators/registry";
+import type { IndicatorNodeConfig, IndicatorState } from "../../indicators/types";
 
 // ── Public API ───────────────────────────────────────────────
 
@@ -23,7 +25,7 @@ export function createInitialState(initialEquity: number = 10_000): EngineState 
     nodeValues: {},
     prevBooleans: {},
     prevSeries: {},
-    indicators: { rsi: {} },
+    indicators: { rsi: {}, generic: {} },
     position: null,
     risk: {},
     equity: initialEquity,
@@ -54,6 +56,7 @@ export function step(
     prevSeries: { ...state.prevSeries },
     indicators: {
       rsi: { ...state.indicators.rsi },
+      generic: { ...state.indicators.generic },
     },
     position: state.position ? { ...state.position } : null,
     risk: { ...state.risk },
@@ -147,6 +150,35 @@ function evaluateNode(
       const { value, nextState } = stepRsi(rsiState, bar.close);
       state.indicators.rsi[node.id] = nextState;
       return value;
+    }
+
+    // ── Registry-based indicator ───────────────────────────
+    case "indicator": {
+      const config = data as unknown as IndicatorNodeConfig;
+      const indicatorId = config.indicatorId as string;
+      const params = (config.params as Record<string, number | string>) ?? {};
+
+      const def = indicatorRegistry.get(indicatorId);
+      if (!def) return null;
+
+      const nodeState = (state.indicators.generic[node.id] ?? def.createState(params)) as IndicatorState;
+
+      const result = def.step({
+        bar: { open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume ?? 0, timeSec: bar.timeSec },
+        params,
+        state: nodeState,
+      });
+
+      state.indicators.generic[node.id] = result.nextState;
+
+      // Store each named output so downstream nodes can read by sourceHandle.
+      for (const [name, value] of Object.entries(result.outputs)) {
+        state.nodeValues[`${node.id}:${name}`] = value;
+      }
+
+      // Return the primary output (first declared field) as the node's scalar value.
+      const primaryKey = def.outputs[0]?.name;
+      return primaryKey !== undefined ? (result.outputs[primaryKey] ?? null) : null;
     }
 
     // ── Logic ──────────────────────────────────────────────
@@ -397,7 +429,9 @@ function getNumericInput(
 ): number | null {
   const edge = inputs.find((e) => e.targetHandle === handle) ?? inputs[positionalIdx];
   if (!edge) return null;
-  const v = state.nodeValues[edge.sourceId];
+  // If the edge carries a sourceHandle (multi-output indicator), look up the named output slot.
+  const key = edge.sourceHandle ? `${edge.sourceId}:${edge.sourceHandle}` : edge.sourceId;
+  const v = state.nodeValues[key];
   return typeof v === "number" ? v : null;
 }
 
@@ -407,7 +441,9 @@ function resolveSourceId(
   positionalIdx: number,
 ): string | undefined {
   const edge = inputs.find((e) => e.targetHandle === handle) ?? inputs[positionalIdx];
-  return edge?.sourceId;
+  if (!edge) return undefined;
+  // Use the composite key so cross-bar prevSeries tracking works for named outputs.
+  return edge.sourceHandle ? `${edge.sourceId}:${edge.sourceHandle}` : edge.sourceId;
 }
 
 function getAllBooleans(inputs: CompiledInput[], state: EngineState): boolean[] {

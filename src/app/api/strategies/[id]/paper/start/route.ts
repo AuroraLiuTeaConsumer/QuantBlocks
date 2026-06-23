@@ -70,33 +70,36 @@ export async function POST(
     }
 
     // ── Ensure data exists for the replay window — auto-ingest if needed ────
-    {
-      const windowEnd = new Date();
-      const windowStart = barCursor ?? new Date(windowEnd.getTime() - 90 * 24 * 3600 * 1_000);
-      const loader = getBacktestDataLoader();
+    const windowEnd = new Date();
+    const windowStart = barCursor ?? new Date(windowEnd.getTime() - 90 * 24 * 3600 * 1_000);
+    // Persist the resolved replay start so the snapshot's barCursor always
+    // reflects where playback actually begins (not just explicit replayFrom).
+    // The chart seed endpoint relies on this to avoid seeding bars that are
+    // newer than the first bar the replay will append.
+    barCursor = windowStart;
+    const loader = getBacktestDataLoader();
 
+    try {
+      await loader.load({ exchange: mapping.exchange, symbol: mapping.symbol, timeframe: tf as Timeframe, startTime: windowStart, endTime: windowEnd });
+    } catch (loadErr) {
+      if (!(loadErr instanceof InsufficientDataError)) {
+        const msg = loadErr instanceof Error ? loadErr.message : String(loadErr);
+        return NextResponse.json({ error: `Failed to verify market data: ${msg}` }, { status: 422 });
+      }
+      console.log(`[paper/start] ${loadErr.coveragePct.toFixed(1)}% coverage for ${mapping.exchange} ${mapping.symbol} ${tf} — auto-ingesting…`);
       try {
+        const ingestService = new HistoricalDataIngestionService();
+        await ingestService.ingest(
+          { exchange: mapping.exchange, symbol: mapping.symbol, timeframe: tf as Timeframe, startTime: windowStart, endTime: windowEnd },
+          (msg) => console.log(`[paper ingest] ${msg}`),
+        );
         await loader.load({ exchange: mapping.exchange, symbol: mapping.symbol, timeframe: tf as Timeframe, startTime: windowStart, endTime: windowEnd });
-      } catch (loadErr) {
-        if (!(loadErr instanceof InsufficientDataError)) {
-          const msg = loadErr instanceof Error ? loadErr.message : String(loadErr);
-          return NextResponse.json({ error: `Failed to verify market data: ${msg}` }, { status: 422 });
-        }
-        console.log(`[paper/start] ${loadErr.coveragePct.toFixed(1)}% coverage for ${mapping.exchange} ${mapping.symbol} ${tf} — auto-ingesting…`);
-        try {
-          const ingestService = new HistoricalDataIngestionService();
-          await ingestService.ingest(
-            { exchange: mapping.exchange, symbol: mapping.symbol, timeframe: tf as Timeframe, startTime: windowStart, endTime: windowEnd },
-            (msg) => console.log(`[paper ingest] ${msg}`),
-          );
-          await loader.load({ exchange: mapping.exchange, symbol: mapping.symbol, timeframe: tf as Timeframe, startTime: windowStart, endTime: windowEnd });
-        } catch (retryErr) {
-          const message =
-            retryErr instanceof InsufficientDataError
-              ? `Not enough data after auto-ingest: ${retryErr.coveragePct.toFixed(1)}% coverage. Try a different replay date.`
-              : `Auto-ingestion failed: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`;
-          return NextResponse.json({ error: message }, { status: 422 });
-        }
+      } catch (retryErr) {
+        const message =
+          retryErr instanceof InsufficientDataError
+            ? `Not enough data after auto-ingest: ${retryErr.coveragePct.toFixed(1)}% coverage. Try a different replay date.`
+            : `Auto-ingestion failed: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`;
+        return NextResponse.json({ error: message }, { status: 422 });
       }
     }
 

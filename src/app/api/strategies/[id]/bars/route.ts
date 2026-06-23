@@ -91,6 +91,13 @@ export async function GET(
     return NextResponse.json({ error: "Invalid limit parameter" }, { status: 400 });
   }
 
+  // `end` lets callers anchor the window to a point other than "now" — e.g.
+  // a paper session seeding chart context ending at its replay start, so the
+  // seeded bars never sit later in time than the first bar the replay appends.
+  const endParam = searchParams.get("end");
+  const endParamDate = endParam ? new Date(endParam) : null;
+  const anchorEnd = endParamDate && !Number.isNaN(endParamDate.getTime()) ? endParamDate : new Date();
+
   // ── Attempt real data from TimescaleDB ───────────────────────────────────
 
   const mapping = resolveInstrument(strategy.instrument);
@@ -99,7 +106,7 @@ export async function GET(
   if (mapping && tf) {
     try {
       const repo = getTimescaleRepo();
-      const endTime = new Date();
+      const endTime = anchorEnd;
       const startTime = new Date(endTime.getTime() - 90 * 24 * 3_600 * 1_000);
 
       const candles = await repo.queryCandles({

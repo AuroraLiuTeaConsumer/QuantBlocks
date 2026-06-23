@@ -19,7 +19,7 @@ On every poll the route:
 4. Updates `PaperSession.barCursor` to the last processed candle's `open_time`.
 5. If no new candles are available (replay is caught up), returns the current snapshot without advancing.
 
-The `barCursor` starts at `replayFrom` (if provided at start time) or defaults to 90 days before session creation when null. The 90-day lookback matches the default ingestion window and avoids replaying from the beginning of the entire DB history.
+The `barCursor` is resolved and persisted at session creation: `replayFrom` (if provided), otherwise 90 days before session creation. It is never left `null` — `paper/start` stores the resolved value up front so every snapshot reports the true replay anchor, not just explicit replays. This also lets the chart's bar-seeding request (`GET /api/strategies/:id/bars?end=<barCursor>`) anchor its window to end exactly where the replay begins, instead of "now" — see [Chart Seeding](#chart-seeding) below.
 
 ## Session Lifecycle
 
@@ -39,9 +39,15 @@ The `barCursor` starts at `replayFrom` (if provided at start time) or defaults t
 ## Polling and Hydration Model
 
 - **Mount**: GET `/api/strategies/:id/paper/session` — if `running`, resume session + trades polling; if `stopped`, load snapshot + trades without polling
-- **Session poll** (1s, while running): GET `/api/paper/:sessionId` → up to 5 real candles per poll; steps engine; updates session; returns snapshot
+- **Session poll** (1s, while running): GET `/api/paper/:sessionId` → up to 5 real candles per poll; steps engine; updates session; returns snapshot (includes `lastBar` OHLC)
 - **Trades poll** (3s, while running): GET `/api/paper/:sessionId/trades` → list of PaperTrades
-- Client streams equity/price to chart via `appendFromSnapshot`; markers from trades
+- Client streams equity/candle updates to chart via `appendFromSnapshot` (`TwoPaneChart.appendEquity` + `.appendBar`); markers from trades
+
+## Chart Seeding
+
+On mount/start, `PaperTradingPanel.fetchAndSeedBars` fetches historical context via `GET /api/strategies/:id/bars?end=<barCursor>&limit=500` and calls `TwoPaneChart.initBars` to pre-populate the candlestick series (`series.setData`) before live `appendBar` updates begin.
+
+The `end` param **must** be the session's `barCursor`, not "now" — `lightweight-charts` series throw `Cannot update oldest data` if `.update()` is called with a time older than the last point in the series, and because the replay always starts well in the past (see Bar Source above), seeding up to "now" guarantees the first live `appendBar` call is older than the seeded data. That exception used to get silently swallowed by `pollSession`'s catch block before `lastEquityTimeRef` advanced, so it repeated on every 1s poll forever and the candlestick pane froze while the session kept running. Always anchor `end` to `barCursor`.
 
 ## UI Controls
 

@@ -156,11 +156,16 @@ export function PaperTradingPanel({
     }
   }, []);
 
-  const fetchAndSeedBars = useCallback(async (stratId: string, timeframe: string) => {
+  // `anchor` (the session's barCursor) caps the seeded window so it never
+  // extends past the first bar the live replay will append — otherwise the
+  // candlestick series ends up seeded with bars newer than the replay,
+  // and the first appendBar() throws "Cannot update oldest data" on every
+  // poll forever, freezing the chart while the session keeps running.
+  const fetchAndSeedBars = useCallback(async (stratId: string, timeframe: string, anchor?: string | null) => {
     try {
-      const res = await fetch(
-        `/api/strategies/${stratId}/bars?timeframe=${encodeURIComponent(timeframe)}&limit=500`,
-      );
+      const params = new URLSearchParams({ timeframe, limit: "500" });
+      if (anchor) params.set("end", anchor);
+      const res = await fetch(`/api/strategies/${stratId}/bars?${params.toString()}`);
       if (!res.ok || !mountedRef.current) return;
       const data = await res.json();
       if (Array.isArray(data) && mountedRef.current) {
@@ -291,7 +296,7 @@ export function PaperTradingPanel({
         if (cancelled) return;
         setSession(snap);
         pollTrades(snap.id);
-        fetchAndSeedBars(snap.strategyId, snap.timeframe);
+        fetchAndSeedBars(snap.strategyId, snap.timeframe, snap.barCursor);
         if (snap.status === "running") startPolling(snap.id);
         setRestoring(false);
       })
@@ -350,7 +355,7 @@ export function PaperTradingPanel({
       setTrades([]);
       setLoading(false);
       appendFromSnapshot(snap);
-      fetchAndSeedBars(strategyId, snap.timeframe);
+      fetchAndSeedBars(strategyId, snap.timeframe, snap.barCursor);
       if (snap.status === "running") startPolling(snap.id);
     } catch (err) {
       if (mountedRef.current) {

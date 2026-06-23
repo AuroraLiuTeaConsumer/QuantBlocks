@@ -3,9 +3,13 @@
  *
  * Server component: queries TimescaleDB coverage and recent IngestionJob records
  * directly (no client-side fetch needed for the initial render).
+ * force-dynamic ensures each request (including router.refresh()) hits the DB fresh.
  */
 
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
+import { MarketDataRefresher } from "./MarketDataRefresher";
 import { getTimescaleRepo } from "@/lib/market-data/storage/timescale.repo";
 import { prisma } from "@/lib/prisma";
 import type {
@@ -299,10 +303,9 @@ export default async function MarketDataPage() {
             ← Home
           </Link>
           <h1 className="text-xl font-semibold text-white">Market Data</h1>
+          <span className="text-xs text-gray-500">{fmtN(totalRows)} total rows</span>
         </div>
-        <div className="text-xs text-gray-500">
-          {fmtN(totalRows)} total rows across all tables
-        </div>
+        <MarketDataRefresher />
       </div>
 
       <div className="max-w-6xl mx-auto px-6 py-8 space-y-10">

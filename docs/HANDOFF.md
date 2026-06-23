@@ -161,7 +161,7 @@ scripts/setup-timescale.ts             # Runs all db/migrations/timescale/*.sql 
 | ~~10~~ | ~~No auth / rate limiting~~ | ✅ Resolved — `src/middleware.ts`; see §9 for new env var |
 | ~~11~~ | ~~Error boundaries~~ | ✅ Resolved — `src/components/ErrorBoundary.tsx`; four panels in `StrategyWorkspace`; three `error.tsx` route files |
 | ~~17~~ | ~~OI availability~~ | ✅ Resolved — `open-interest-service.ts`; unsupported exchanges return 0 rows (completed) instead of failing |
-| 18 | Coverage dashboard refresh | Static server render; requires manual reload |
+| ~~18~~ | ~~Coverage dashboard refresh~~ | ✅ Resolved — `force-dynamic` + `MarketDataRefresher.tsx`; auto-refreshes every 30s via `router.refresh()` |
 | 19 | Quality report in BacktestPanel | `QualityReport` in `IngestionJob.meta` but not displayed in UI |
 | 26 | CoinGlass cross-exchange OI | Not yet ingested |
 

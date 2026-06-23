@@ -28,6 +28,7 @@
 | 10 | Auth / rate limiting | ✅ `src/middleware.ts` — same-origin enforcement on all frontend routes; `x-api-key` required for `/api/market-data/ingest`, `/api/internal/*`, `/api/admin/*`; in-memory fixed-window rate limiting by route category (ai: 10/min, backtests: 20/min, paper-poll: 120/min, paper-control: 20/min, market-candles: 60/min, default: 60/min). Set `QUANTBLOCKS_API_KEY` env var to protect internal routes; omit in dev to allow without key. Replace `_rlStore` with Redis/Upstash and add NextAuth before multi-user deployment. |
 | 11 | Error boundaries | ✅ `src/components/ErrorBoundary.tsx` — reusable class component (label + Retry); wraps StrategyCanvas, AiPromptPanel, BacktestPanel, PaperTradingPanel independently in `StrategyWorkspace`; Next.js `error.tsx` added for `/strategies`, `/strategies/[id]`, `/market-data` routes. |
 | 17 | OI availability | ✅ `open-interest-service.ts` — `isUnsupportedError()` detects permanent capability gaps; `fetchWithRetry` skips retries for them; `ingest()` returns `{ rowsInserted: 0 }` (completed) instead of throwing (failed) when the exchange lacks `fetchOpenInterestHistory`. |
+| 18 | Coverage dashboard refresh | ✅ `app/market-data/page.tsx` — `force-dynamic` prevents caching; `MarketDataRefresher.tsx` client component calls `router.refresh()` via `useTransition` every 30s + on button click; shows last-updated time and spinner. Resolves #38 too. |
 
 **Phase 5 summary**: extracted `computeMetrics` into `lib/backtest/metrics.ts`; added risk-adjusted ratios (Sharpe, Sortino, Calmar) and benchmark return; added per-bar funding cost via `lib/backtest/funding.ts` with best-effort DB load; added CSV export endpoint; expanded BacktestPanel metrics grid from 6 to 10 cards; no DB/Prisma schema changes required.
 
@@ -46,9 +47,10 @@
 | ~~8~~ | ~~Strategy creation UX~~ | ✅ Resolved — see Resolved table |
 | ~~9~~ | ~~Optimistic lock retry~~ | ✅ Resolved — see Resolved table |
 | ~~10~~ | ~~Auth / rate limiting~~ | ✅ Resolved — see Resolved table |
+| ~~18~~ | ~~Coverage dashboard refresh~~ | ✅ Resolved — see Resolved table |
+| ~~38~~ | ~~Coverage dashboard auto-refresh~~ | ✅ Resolved — see Resolved table |
 | ~~11~~ | ~~Error boundaries~~ | ✅ Resolved — see Resolved table |
 | ~~17~~ | ~~OI availability~~ | ✅ Resolved — see Resolved table |
-| 18 | Coverage dashboard refresh | Page is static server-render; requires manual reload to reflect new data |
 | 19 | Quality report in BacktestPanel | `QualityReport` stored in `IngestionJob.meta` but not surfaced in the UI yet |
 
 ## Phase 4 (Next) — Redis + Advanced Live
@@ -82,4 +84,4 @@
 | 34 | Strategy templates / examples |
 | 36 | Keyboard shortcuts for canvas |
 | 37 | Mobile/responsive improvements |
-| 38 | Coverage dashboard auto-refresh |
+| ~~38~~ | ~~Coverage dashboard auto-refresh~~ | ✅ Resolved with #18 |

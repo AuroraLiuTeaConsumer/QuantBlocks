@@ -158,7 +158,8 @@ scripts/setup-timescale.ts             # Runs all db/migrations/timescale/*.sql 
 | ~~7~~ | ~~AI stub~~ | ✅ Resolved — `POST /api/ai/translateStrategy` now calls `claude-sonnet-4-6`; one self-correction retry; requires `ANTHROPIC_API_KEY` |
 | ~~8~~ | ~~Strategy creation UX~~ | ✅ Resolved — `/strategies` "New Strategy" button + name form; POST/PUT allow empty/incremental graphs |
 | ~~9~~ | ~~Optimistic lock retry~~ | ✅ Resolved — poll route retries up to 3× on `updateMany` collision |
-| 10 | No auth / rate limiting | All API routes are unprotected |
+| ~~10~~ | ~~No auth / rate limiting~~ | ✅ Resolved — `src/middleware.ts`; see §9 for new env var |
+| ~~11~~ | ~~Error boundaries~~ | ✅ Resolved — `src/components/ErrorBoundary.tsx`; four panels in `StrategyWorkspace`; three `error.tsx` route files |
 | 17 | OI availability | `fetchOpenInterestHistory` not supported on all CCXT exchanges |
 | 18 | Coverage dashboard refresh | Static server render; requires manual reload |
 | 19 | Quality report in BacktestPanel | `QualityReport` in `IngestionJob.meta` but not displayed in UI |
@@ -217,7 +218,9 @@ npm run ws:ingest -- --symbols BTCUSDT,ETHUSDT --timeframe 1m
 | Variable | Required | Notes |
 |----------|----------|-------|
 | `DATABASE_URL` | **Yes** | PostgreSQL connection string — used by both Prisma and TimescaleDB raw pool. Example: `postgresql://postgres:postgres@localhost:5432/quantblocks` |
+| `ANTHROPIC_API_KEY` | No* | Required for `POST /api/ai/translateStrategy`. Without it the AI translate route returns 500. |
 | `COINGLASS_API_KEY` | No* | Required only for `liquidation` / `long_short` ingest types. Without it, those routes return 503 and CLI exits cleanly. All other functionality works without it. |
+| `QUANTBLOCKS_API_KEY` | No* | Protects internal/admin routes and `POST /api/market-data/ingest`. In development, omitting it logs a warning and allows requests. In production (`NODE_ENV=production`), omitting it makes those routes return 401. Set to any long random string (e.g., a UUID). |
 
 ---
 

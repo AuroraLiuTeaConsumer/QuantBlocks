@@ -7,6 +7,7 @@ import { NodePalette } from "./NodePalette";
 import { AiPromptPanel } from "./AiPromptPanel";
 import { BacktestPanel } from "./BacktestPanel";
 import { PaperTradingPanel } from "./PaperTradingPanel";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { StrategyGraphSchema } from "@/lib/strategy/graphTypes";
 import type { StrategyGraph, StrategyNode, StrategyEdge } from "@/lib/strategy/graphTypes";
 
@@ -220,38 +221,42 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
 
           {/* Canvas + floating AI panel */}
           <div className="relative min-h-0 flex-1">
-            <StrategyCanvas
-              strategyId={strategy.id}
-              initialNodes={initialNodes}
-              initialEdges={initialEdges}
-              onSaveSuccess={() => {
-                setSaveError(null);
-                prevGraphRef.current = null;
-                setHasPendingApply(false);
-                setSaveStatus("saved");
-                setTimeout(() => setSaveStatus("idle"), 2500);
-              }}
-              onSaveError={(msg) => {
-                setSaveError(msg);
-                if (prevGraphRef.current) {
-                  setAppliedGraph(prevGraphRef.current);
+            <ErrorBoundary label="Canvas">
+              <StrategyCanvas
+                strategyId={strategy.id}
+                initialNodes={initialNodes}
+                initialEdges={initialEdges}
+                onSaveSuccess={() => {
+                  setSaveError(null);
                   prevGraphRef.current = null;
-                }
-                setHasPendingApply(false);
-                setSaveStatus("error");
-              }}
-              onSavingChange={setIsCanvasSaving}
-              saveRequestKey={saveRequestKey}
-            />
-            <AiPromptPanel
-              open={aiOpen}
-              onClose={() => setAiOpen(false)}
-              onDraft={(g) => {
-                setDraftGraph(g);
-                setAiOpen(false);
-              }}
-              onError={setSaveError}
-            />
+                  setHasPendingApply(false);
+                  setSaveStatus("saved");
+                  setTimeout(() => setSaveStatus("idle"), 2500);
+                }}
+                onSaveError={(msg) => {
+                  setSaveError(msg);
+                  if (prevGraphRef.current) {
+                    setAppliedGraph(prevGraphRef.current);
+                    prevGraphRef.current = null;
+                  }
+                  setHasPendingApply(false);
+                  setSaveStatus("error");
+                }}
+                onSavingChange={setIsCanvasSaving}
+                saveRequestKey={saveRequestKey}
+              />
+            </ErrorBoundary>
+            <ErrorBoundary label="AI Builder">
+              <AiPromptPanel
+                open={aiOpen}
+                onClose={() => setAiOpen(false)}
+                onDraft={(g) => {
+                  setDraftGraph(g);
+                  setAiOpen(false);
+                }}
+                onError={setSaveError}
+              />
+            </ErrorBoundary>
           </div>
 
           {/* Bottom drawer */}
@@ -320,17 +325,21 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
               style={{ display: drawerCollapsed ? "none" : undefined }}
             >
               <div className="h-full" style={bottomTab !== "backtest" ? { display: "none" } : undefined}>
-                <BacktestPanel
-                  strategyId={strategy.id}
-                  strategyTimeframe={strategy.timeframe}
-                  disableRun={isCanvasSaving || hasPendingApply}
-                />
+                <ErrorBoundary label="Backtest">
+                  <BacktestPanel
+                    strategyId={strategy.id}
+                    strategyTimeframe={strategy.timeframe}
+                    disableRun={isCanvasSaving || hasPendingApply}
+                  />
+                </ErrorBoundary>
               </div>
               <div className="h-full" style={bottomTab !== "paper" ? { display: "none" } : undefined}>
-                <PaperTradingPanel
-                  strategyId={strategy.id}
-                  disableRun={isCanvasSaving || hasPendingApply}
-                />
+                <ErrorBoundary label="Paper Trading">
+                  <PaperTradingPanel
+                    strategyId={strategy.id}
+                    disableRun={isCanvasSaving || hasPendingApply}
+                  />
+                </ErrorBoundary>
               </div>
             </div>
           </div>

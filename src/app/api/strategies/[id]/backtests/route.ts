@@ -13,6 +13,8 @@ import {
   isTimeframe,
   TIMEFRAME_MS,
 } from "@/lib/market-data/types";
+import type { QualityReport } from "@/lib/market-data/types";
+import { checkCandleQuality } from "@/lib/market-data/ingestion/quality-checker";
 import { getTimescaleRepo } from "@/lib/market-data/storage/timescale.repo";
 import type { Candle as BacktestCandle } from "@/lib/backtest/backtest";
 import type { FundingRate } from "@/lib/market-data/types";
@@ -80,6 +82,7 @@ export async function POST(
   let candles: BacktestCandle[];
   let dataSourceLabel: string;
   let fundingRates: FundingRate[] = [];
+  let dataQuality: QualityReport | undefined;
 
   try {
     const loader = getBacktestDataLoader();
@@ -94,6 +97,11 @@ export async function POST(
         startTime,
         endTime,
       });
+      // Quality check on cached data so the report is always populated
+      const { report } = checkCandleQuality(
+        dataset.candles.map((c) => ({ ...c, openTime: new Date(c.time) })),
+      );
+      dataQuality = report;
     } catch (loadErr) {
       if (!(loadErr instanceof InsufficientDataError)) throw loadErr;
 
@@ -103,11 +111,12 @@ export async function POST(
           `${mapping.exchange} ${mapping.symbol} ${tf} — auto-ingesting…`,
       );
       const ingestService = new HistoricalDataIngestionService();
-      await ingestService.ingest(
+      const ingestResult = await ingestService.ingest(
         { exchange: mapping.exchange, symbol: mapping.symbol, timeframe: tf, startTime, endTime },
         (msg) => console.log(`[backtest ingest] ${msg}`),
       );
       autoIngested = true;
+      dataQuality = ingestResult.quality;
 
       // One retry after ingest
       dataset = await loader.load({
@@ -200,6 +209,7 @@ export async function POST(
             dataSource: "real",
             dataSourceLabel,
             fundingRatesLoaded: fundingRates.length,
+            dataQuality: dataQuality ?? null,
           }),
         ),
       },

@@ -41,7 +41,7 @@ import {
   isCGTimeframe,
   toCoinGlassSymbol,
 } from "@/lib/market-data/types";
-import type { Exchange, Timeframe } from "@/lib/market-data/types";
+import type { Exchange, Timeframe, IngestionResult } from "@/lib/market-data/types";
 
 export async function POST(req: NextRequest) {
   let body: Record<string, unknown> = {};
@@ -138,7 +138,7 @@ export async function POST(req: NextRequest) {
   // ── Run ingestion ─────────────────────────────────────────────────────────
 
   try {
-    let result: { rowsInserted: number; gapsFilled: number; durationMs: number };
+    let result: IngestionResult;
 
     if (dataType === "funding_rate") {
       const service = new FundingRateIngestionService();
@@ -165,7 +165,11 @@ export async function POST(req: NextRequest) {
         status: "completed",
         rowsInserted: result.rowsInserted,
         completedAt: new Date(),
-        meta: { gapsFilled: result.gapsFilled, durationMs: result.durationMs },
+        meta: JSON.parse(JSON.stringify({
+          gapsFilled: result.gapsFilled,
+          durationMs: result.durationMs,
+          quality: result.quality ?? null,
+        })),
       },
     });
 
@@ -174,6 +178,7 @@ export async function POST(req: NextRequest) {
       rowsInserted: result.rowsInserted,
       gapsFilled: result.gapsFilled,
       durationMs: result.durationMs,
+      ...(result.quality ? { quality: result.quality } : {}),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

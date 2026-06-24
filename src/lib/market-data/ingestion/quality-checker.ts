@@ -15,10 +15,17 @@
  * filter them out or log them for manual review.
  */
 
-import type { Candle } from "../types";
-
 /** Percentage change that qualifies as a "spike" warning (15%). */
 const SPIKE_THRESHOLD = 0.15;
+
+interface CandleOHLCV {
+  openTime: Date;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
 
 export interface QualityReport {
   totalChecked: number;
@@ -36,7 +43,7 @@ export interface QualityCheckResult {
   warnings: string[];
 }
 
-export function checkCandleQuality(candles: Candle[]): QualityCheckResult {
+export function checkCandleQuality(candles: CandleOHLCV[]): QualityCheckResult {
   const report: QualityReport = {
     totalChecked: candles.length,
     ohlcErrors: 0,

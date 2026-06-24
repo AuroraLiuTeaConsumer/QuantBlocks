@@ -52,7 +52,7 @@ import {
   isCGTimeframe,
   toCoinGlassSymbol,
 } from "../../lib/market-data/types";
-import type { Exchange, Timeframe } from "../../lib/market-data/types";
+import type { Exchange, Timeframe, IngestionResult } from "../../lib/market-data/types";
 
 // ─── Arg parsing ─────────────────────────────────────────────────────────────
 
@@ -125,7 +125,7 @@ async function main() {
   }
 
   try {
-    let result: { rowsInserted: number; gapsFilled: number; durationMs: number };
+    let result: IngestionResult;
 
     if (dataType === "funding_rate") {
       const service = new FundingRateIngestionService();
@@ -182,7 +182,11 @@ async function main() {
           status: "completed",
           rowsInserted: result.rowsInserted,
           completedAt: new Date(),
-          meta: { gapsFilled: result.gapsFilled, durationMs: result.durationMs },
+          meta: JSON.parse(JSON.stringify({
+            gapsFilled: result.gapsFilled,
+            durationMs: result.durationMs,
+            quality: result.quality ?? null,
+          })),
         },
       });
     }

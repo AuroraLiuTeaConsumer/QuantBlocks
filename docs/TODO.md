@@ -29,6 +29,7 @@
 | 11 | Error boundaries | ✅ `src/components/ErrorBoundary.tsx` — reusable class component (label + Retry); wraps StrategyCanvas, AiPromptPanel, BacktestPanel, PaperTradingPanel independently in `StrategyWorkspace`; Next.js `error.tsx` added for `/strategies`, `/strategies/[id]`, `/market-data` routes. |
 | 17 | OI availability | ✅ `open-interest-service.ts` — `isUnsupportedError()` detects permanent capability gaps; `fetchWithRetry` skips retries for them; `ingest()` returns `{ rowsInserted: 0 }` (completed) instead of throwing (failed) when the exchange lacks `fetchOpenInterestHistory`. |
 | 18 | Coverage dashboard refresh | ✅ `app/market-data/page.tsx` — `force-dynamic` prevents caching; `MarketDataRefresher.tsx` client component calls `router.refresh()` via `useTransition` every 30s + on button click; shows last-updated time and spinner. Resolves #38 too. |
+| 19 | Quality report in BacktestPanel | ✅ `QualityReport` now stored in `BacktestRun.log.dataQuality` (captured during auto-ingest) and in `IngestionJob.meta` from both API route and CLI. `BacktestPanel` renders a compact quality row after metrics grid: bar count + per-issue breakdown (OHLC errors, negative prices, volume errors, price spikes) or "✓ Clean". |
 
 **Phase 5 summary**: extracted `computeMetrics` into `lib/backtest/metrics.ts`; added risk-adjusted ratios (Sharpe, Sortino, Calmar) and benchmark return; added per-bar funding cost via `lib/backtest/funding.ts` with best-effort DB load; added CSV export endpoint; expanded BacktestPanel metrics grid from 6 to 10 cards; no DB/Prisma schema changes required.
 
@@ -51,7 +52,7 @@
 | ~~38~~ | ~~Coverage dashboard auto-refresh~~ | ✅ Resolved — see Resolved table |
 | ~~11~~ | ~~Error boundaries~~ | ✅ Resolved — see Resolved table |
 | ~~17~~ | ~~OI availability~~ | ✅ Resolved — see Resolved table |
-| 19 | Quality report in BacktestPanel | `QualityReport` stored in `IngestionJob.meta` but not surfaced in the UI yet |
+| ~~19~~ | ~~Quality report in BacktestPanel~~ | ✅ Resolved — see Resolved table |
 
 ## Phase 4 (Next) — Redis + Advanced Live
 

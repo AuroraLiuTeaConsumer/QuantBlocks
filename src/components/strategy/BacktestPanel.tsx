@@ -9,6 +9,14 @@ const POLL_INTERVAL_MS = 1500;
 type EquityPoint = { time: string; equity: number };
 type RunStatus = "idle" | "running" | "success" | "error";
 
+type DataQuality = {
+  totalChecked: number;
+  ohlcErrors: number;
+  negativePrices: number;
+  volumeErrors: number;
+  spikeWarnings: number;
+};
+
 type BacktestRun = {
   id: string;
   status: string;
@@ -19,6 +27,7 @@ type BacktestRun = {
     initialCapital?: number;
     dataSource?: "real" | "sample";
     dataSourceLabel?: string;
+    dataQuality?: DataQuality | null;
   } | null;
   startTime?: string | null;
   endTime?: string | null;
@@ -176,6 +185,7 @@ export function BacktestPanel({
   const [barsUnavailable, setBarsUnavailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dataSourceLabel, setDataSourceLabel] = useState<string | null>(null);
+  const [dataQuality, setDataQuality] = useState<DataQuality | null>(null);
   const [fromDate, setFromDate] = useState(() => daysAgoStr(90));
   const [toDate, setToDate] = useState(() => todayStr());
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -242,6 +252,7 @@ export function BacktestPanel({
       setMetrics(run.metrics ?? null);
       setStatus("success");
       setDataSourceLabel(run.log?.dataSourceLabel ?? null);
+      setDataQuality(run.log?.dataQuality ?? null);
 
       const logCurve = run.log?.equityCurve;
       if (Array.isArray(logCurve) && logCurve.length > 0) {
@@ -325,6 +336,7 @@ export function BacktestPanel({
     setBars(undefined);
     setBarsUnavailable(false);
     setDataSourceLabel(null);
+    setDataQuality(null);
     setStatus("running");
 
     try {
@@ -595,6 +607,50 @@ export function BacktestPanel({
           />
         </div>
       )}
+
+      {/* Data quality */}
+      {status === "success" && dataQuality && dataQuality.totalChecked > 0 && (() => {
+        const { totalChecked, ohlcErrors, negativePrices, volumeErrors, spikeWarnings } = dataQuality;
+        const clean = ohlcErrors === 0 && negativePrices === 0 && volumeErrors === 0 && spikeWarnings === 0;
+        return (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line px-4 py-2">
+            <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-ink-3">
+              Data Quality
+            </span>
+            <span className="text-[11px] text-ink-2">
+              {totalChecked.toLocaleString()} bars checked
+            </span>
+            {clean ? (
+              <span className="text-[11px] font-semibold" style={{ color: "var(--green)" }}>
+                ✓ Clean
+              </span>
+            ) : (
+              <span className="flex flex-wrap items-center gap-x-3">
+                {ohlcErrors > 0 && (
+                  <span className="text-[11px]" style={{ color: "var(--red)" }}>
+                    {ohlcErrors} OHLC error{ohlcErrors !== 1 ? "s" : ""}
+                  </span>
+                )}
+                {negativePrices > 0 && (
+                  <span className="text-[11px]" style={{ color: "var(--red)" }}>
+                    {negativePrices} negative price{negativePrices !== 1 ? "s" : ""}
+                  </span>
+                )}
+                {volumeErrors > 0 && (
+                  <span className="text-[11px]" style={{ color: "var(--amber)" }}>
+                    {volumeErrors} volume error{volumeErrors !== 1 ? "s" : ""}
+                  </span>
+                )}
+                {spikeWarnings > 0 && (
+                  <span className="text-[11px]" style={{ color: "var(--amber)" }}>
+                    {spikeWarnings} price spike{spikeWarnings !== 1 ? "s" : ""}
+                  </span>
+                )}
+              </span>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Trades */}
       {status === "success" && trades.length > 0 && (

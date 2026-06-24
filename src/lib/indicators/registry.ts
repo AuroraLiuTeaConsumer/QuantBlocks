@@ -11,6 +11,13 @@ import { ObvDefinition } from "./builtins/obv";
 import { AdxDefinition } from "./builtins/adx";
 import { DonchianDefinition } from "./builtins/donchian";
 import { KeltnerDefinition } from "./builtins/keltner";
+import { SupertrendDefinition } from "./builtins/supertrend";
+import { WmaDefinition } from "./builtins/wma";
+import { CciDefinition } from "./builtins/cci";
+import { RocDefinition } from "./builtins/roc";
+import { MomentumDefinition } from "./builtins/momentum";
+import { PrevHlDefinition } from "./builtins/prev-hl";
+import { ElderRayDefinition } from "./builtins/elder-ray";
 
 class IndicatorRegistryImpl implements IIndicatorRegistry {
   private readonly defs = new Map<string, IndicatorDefinition>();
@@ -52,3 +59,12 @@ indicatorRegistry.register(ObvDefinition);
 indicatorRegistry.register(AdxDefinition);
 indicatorRegistry.register(DonchianDefinition);
 indicatorRegistry.register(KeltnerDefinition);
+// Phase C — builtins
+indicatorRegistry.register(SupertrendDefinition);
+indicatorRegistry.register(WmaDefinition);
+indicatorRegistry.register(CciDefinition);
+indicatorRegistry.register(RocDefinition);
+indicatorRegistry.register(MomentumDefinition);
+indicatorRegistry.register(PrevHlDefinition);
+// Phase C — composites
+indicatorRegistry.register(ElderRayDefinition);

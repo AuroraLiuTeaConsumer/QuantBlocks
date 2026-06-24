@@ -14,6 +14,7 @@ import {
   isDraftReady,
   requiredMissingCount,
 } from "@/lib/ai/ai-builder-state";
+import { AiDraftCard } from "./AiDraftCard";
 
 // ---------------------------------------------------------------------------
 // Props

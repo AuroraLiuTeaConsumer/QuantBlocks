@@ -67,9 +67,29 @@ export async function POST(req: NextRequest) {
     claudeMessages.push({ role: msg.role, content: msg.content.slice(0, MAX_CONTENT_LENGTH) });
   }
 
-  // Inject current draft state as a second system block so the model always
-  // has the latest draft without it consuming conversation message slots.
-  const draftContext = `Current strategy draft:\n${JSON.stringify(currentDraft ?? EMPTY_DRAFT, null, 2)}`;
+  // Inject current draft + optional canvas summary as a second system block.
+  // The canvas summary is compact (node type counts, not full positions) to save tokens.
+  let draftContext = `Current strategy draft:\n${JSON.stringify(currentDraft ?? EMPTY_DRAFT, null, 2)}`;
+  if (canvasContext && typeof canvasContext === "object") {
+    const ctx = canvasContext as { nodes?: unknown[]; edges?: unknown[] };
+    if (Array.isArray(ctx.nodes) && ctx.nodes.length > 0) {
+      // Whitelist against known node types so user-controlled strings can't
+      // inject arbitrary text into the system prompt via a crafted graph.
+      const KNOWN_NODE_TYPES = new Set([
+        "rsi", "indicator", "price", "volume", "compare", "cross",
+        "and", "or", "not", "open_position", "close_position", "set_risk",
+      ]);
+      const typeCounts: Record<string, number> = {};
+      for (const n of ctx.nodes as Array<{ type?: string }>) {
+        const t = (typeof n.type === "string" && KNOWN_NODE_TYPES.has(n.type)) ? n.type : "unknown";
+        typeCounts[t] = (typeCounts[t] ?? 0) + 1;
+      }
+      const summary = Object.entries(typeCounts)
+        .map(([t, c]) => `${c}× ${t}`)
+        .join(", ");
+      draftContext += `\n\nExisting canvas (${ctx.nodes.length} nodes): ${summary}.`;
+    }
+  }
 
   let raw: string;
   try {
@@ -118,8 +138,6 @@ export async function POST(req: NextRequest) {
       ? parsed.conversationStatus
       : "collecting_requirements",
   };
-
-  void canvasContext; // accepted for future use in Phase C (revise existing graph)
 
   return NextResponse.json(responseBody);
 }

@@ -20,7 +20,7 @@ function isConvertible(cond: StrategyDraftCondition): boolean {
 
 export function validateStrategyDraft(draft: StrategyDraft): DraftValidationResult {
   const errors: string[] = [];
-  const warnings: string[] = [...draft.warnings];
+  const warnings: string[] = [];
 
   if (!draft.symbol?.trim()) {
     errors.push("Symbol is required (e.g. BTCUSDT)");
@@ -62,6 +62,43 @@ export function validateStrategyDraft(draft: StrategyDraft): DraftValidationResu
   if (!hasExit) {
     errors.push(
       "At least one exit mechanism is required (exit condition or stop loss rule)"
+    );
+  }
+
+  // ── Structural warnings (non-blocking) ──────────────────────────────────
+
+  // Overfit risk: too many entry conditions
+  if (draft.entryConditions.length > 3) {
+    warnings.push(
+      `${draft.entryConditions.length} entry conditions is high — complex entry criteria can overfit to historical data. Consider simplifying to 2–3 conditions.`
+    );
+  }
+
+  // Vague logic: unconvertible custom conditions
+  const vagueConds = draft.entryConditions.filter(
+    (c) => c.type === "custom" && !isConvertible(c)
+  );
+  for (const c of vagueConds) {
+    warnings.push(
+      `Entry condition "${c.description}" is too vague to convert automatically — define a specific indicator and threshold.`
+    );
+  }
+
+  // No risk management: neither stop loss, take profit, nor explicit exit conditions
+  if (!draft.riskRules?.stopLoss && !draft.riskRules?.takeProfit && draft.exitConditions.length === 0) {
+    warnings.push(
+      "No stop loss, take profit, or exit condition defined. Unlimited downside risk — consider adding a stop loss before backtesting."
+    );
+  }
+
+  // Price-level entry: specific constant thresholds can overfit to price history
+  const hasStaticPriceLevel = draft.entryConditions.some(
+    (c) => c.type === "price_level" && typeof c.threshold === "number" && c.threshold !== 0
+  );
+  if (hasStaticPriceLevel) {
+    warnings.push(
+      "Static price-level entry (e.g. close > 50000) will only trigger once around that price. " +
+      "Consider a dynamic entry using an indicator or percentage breakout instead."
     );
   }
 

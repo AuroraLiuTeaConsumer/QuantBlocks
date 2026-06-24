@@ -257,6 +257,7 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
                   setAiOpen(false);
                 }}
                 onError={setSaveError}
+                canvasGraph={displayGraph}
               />
             </ErrorBoundary>
           </div>

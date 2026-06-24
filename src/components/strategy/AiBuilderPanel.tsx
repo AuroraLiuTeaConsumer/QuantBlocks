@@ -14,6 +14,7 @@ import {
   isDraftReady,
   requiredMissingCount,
 } from "@/lib/ai/ai-builder-state";
+import { graphToStrategyDraft } from "@/lib/ai/graph-to-draft";
 import { AiDraftCard } from "./AiDraftCard";
 
 // ---------------------------------------------------------------------------
@@ -25,6 +26,7 @@ type AiBuilderPanelProps = {
   onClose: () => void;
   onDraft: (graph: StrategyGraph) => void;
   onError: (message: string) => void;
+  canvasGraph?: StrategyGraph;
 };
 
 // ---------------------------------------------------------------------------
@@ -58,7 +60,7 @@ function createInitialConversation(): AIBuilderConversation {
 // Component
 // ---------------------------------------------------------------------------
 
-export function AiBuilderPanel({ open, onClose, onDraft, onError }: AiBuilderPanelProps) {
+export function AiBuilderPanel({ open, onClose, onDraft, onError, canvasGraph }: AiBuilderPanelProps) {
   const [conversation, setConversation] = useState<AIBuilderConversation>(createInitialConversation);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -68,6 +70,9 @@ export function AiBuilderPanel({ open, onClose, onDraft, onError }: AiBuilderPan
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Tracks whether we have already seeded the draft from canvasGraph this session.
+  // Reset to false each time the panel closes so re-opening a new session can import again.
+  const sessionInitialized = useRef(false);
 
   // Auto-scroll to latest message
   useEffect(() => {
@@ -80,6 +85,37 @@ export function AiBuilderPanel({ open, onClose, onDraft, onError }: AiBuilderPan
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [open]);
+
+  // Revision-mode init: when the panel opens with a non-empty canvas, seed the
+  // draft from the existing graph and skip straight to revision mode.
+  useEffect(() => {
+    if (!open) {
+      sessionInitialized.current = false; // reset so next open can re-import
+      return;
+    }
+    if (sessionInitialized.current) return;
+    sessionInitialized.current = true;
+
+    if (!canvasGraph || canvasGraph.nodes.length === 0) return;
+
+    const importedDraft = graphToStrategyDraft(canvasGraph);
+    const revisionWelcome: AIBuilderMessage = {
+      id: "revision-welcome",
+      role: "assistant",
+      content:
+        "I've loaded your current strategy from the canvas.\n\nWhat would you like to change? For example:\n• Adjust stop loss or take profit\n• Switch to a different indicator\n• Add or remove a filter\n• Explain what this strategy does",
+      timestamp: Date.now(),
+      quickReplies: ["Adjust stop loss", "Change entry indicator", "Add volume filter", "Explain my strategy"],
+    };
+
+    setConversation((prev) => ({
+      ...prev,
+      status: "revising",
+      draft: importedDraft,
+      messages: [revisionWelcome],
+    }));
+    setNextAction("ask_clarification");
+  }, [open, canvasGraph]);
 
   // Close on Escape
   useEffect(() => {
@@ -124,7 +160,7 @@ export function AiBuilderPanel({ open, onClose, onDraft, onError }: AiBuilderPan
       const res = await fetch("/api/ai/builder/message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: messagesWithUser, currentDraft }),
+        body: JSON.stringify({ messages: messagesWithUser, currentDraft, canvasContext: canvasGraph }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -162,7 +198,11 @@ export function AiBuilderPanel({ open, onClose, onDraft, onError }: AiBuilderPan
       setNextAction(newNextAction ?? "ask_clarification");
       setConversation((prev) => ({
         ...prev,
-        status: conversationStatus ?? "collecting_requirements",
+        // Preserve "revising" — the server validator never emits it, so the
+        // server value would always clobber the client's revision state.
+        status: prev.status === "revising"
+          ? "revising"
+          : (conversationStatus ?? "collecting_requirements"),
         messages: [...prev.messages, assistantMessage],
         draft: updatedDraft,
       }));
@@ -276,8 +316,8 @@ export function AiBuilderPanel({ open, onClose, onDraft, onError }: AiBuilderPan
         </button>
       </div>
 
-      {/* Draft summary card — shown once the conversation is active */}
-      {conversation.status !== "idle" && (
+      {/* Draft summary card — shown once the conversation is active or in revision mode */}
+      {(conversation.status !== "idle") && (
         <AiDraftCard draft={conversation.draft} />
       )}
 

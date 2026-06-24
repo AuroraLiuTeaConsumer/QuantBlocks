@@ -56,6 +56,8 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     graph,
-    warnings: [...draftValidation.warnings, ...warnings],
+    // draft.warnings = LLM's own notes; draftValidation.warnings = structural checks;
+    // warnings = converter notes. Kept separate so none accumulate across validate calls.
+    warnings: [...draft.warnings, ...draftValidation.warnings, ...warnings],
   });
 }

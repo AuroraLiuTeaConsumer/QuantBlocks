@@ -115,7 +115,7 @@ export async function GET(
         exchange: mapping.exchange,
         symbol: mapping.symbol,
         timeframe,
-        startTime: new Date(cursor.getTime() + 1),
+        startTime: cursor,
         endTime: new Date(),
         limit: 5,
       });

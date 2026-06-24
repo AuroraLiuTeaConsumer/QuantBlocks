@@ -143,16 +143,22 @@ export function PaperTradingPanel({
   const appendFromSnapshot = useCallback((snap: SessionSnapshot) => {
     const chart = chartRef.current;
     if (!chart) return;
-    const time = snap.lastBar?.time ?? (snap.barCursor ? toUTCSec(snap.barCursor) : toUTCSec(snap.updatedAt));
-    if (time > lastEquityTimeRef.current) {
-      chart.appendEquity({ time, value: snap.equity });
-      if (snap.lastBar) {
+    if (snap.lastBar) {
+      const time = snap.lastBar.time;
+      if (time > lastEquityTimeRef.current) {
+        chart.appendEquity({ time, value: snap.equity });
         chart.appendBar(snap.lastBar);
-      } else {
-        // Fallback synthetic candle when poll response has no OHLC (e.g. stale session restore)
-        chart.appendBar({ time, open: snap.lastPrice, high: snap.lastPrice, low: snap.lastPrice, close: snap.lastPrice });
+        lastEquityTimeRef.current = time;
       }
-      lastEquityTimeRef.current = time;
+    } else {
+      // No bar yet (e.g. start snapshot before first poll bar) — append equity
+      // only so the series stays current without planting a wrong-priced candle.
+      const time = snap.barCursor ? toUTCSec(snap.barCursor) : toUTCSec(snap.updatedAt);
+      if (time > lastEquityTimeRef.current) {
+        chart.appendEquity({ time, value: snap.equity });
+        // Do not advance lastEquityTimeRef — the first real bar at barCursor
+        // must still be allowed to append its candle.
+      }
     }
   }, []);
 

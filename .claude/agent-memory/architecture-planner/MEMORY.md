@@ -1,0 +1,2 @@
+- [User Profile](user_profile.md) — Aurora, works on QuantBlocks; wants architecture-only plans (no code) for Phase 4 paper-trading streaming
+- [QuantBlocks Constraints](project_constraints.md) — hard non-goals from HANDOFF.md: no migrate dev, don't touch engine, raw-SQL migration protocol

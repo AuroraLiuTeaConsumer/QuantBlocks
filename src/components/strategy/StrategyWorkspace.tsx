@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import { StrategyCanvas } from "./StrategyCanvas";
 import { NodePalette } from "./NodePalette";
-import { AiPromptPanel } from "./AiPromptPanel";
+import { AiBuilderPanel } from "./AiBuilderPanel";
 import { BacktestPanel } from "./BacktestPanel";
 import { PaperTradingPanel } from "./PaperTradingPanel";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -219,35 +219,37 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
             </button>
           </div>
 
-          {/* Canvas + floating AI panel */}
-          <div className="relative min-h-0 flex-1">
-            <ErrorBoundary label="Canvas">
-              <StrategyCanvas
-                strategyId={strategy.id}
-                initialNodes={initialNodes}
-                initialEdges={initialEdges}
-                onSaveSuccess={() => {
-                  setSaveError(null);
-                  prevGraphRef.current = null;
-                  setHasPendingApply(false);
-                  setSaveStatus("saved");
-                  setTimeout(() => setSaveStatus("idle"), 2500);
-                }}
-                onSaveError={(msg) => {
-                  setSaveError(msg);
-                  if (prevGraphRef.current) {
-                    setAppliedGraph(prevGraphRef.current);
+          {/* Canvas + side AI Builder panel */}
+          <div className="flex min-h-0 flex-1">
+            <div className="relative min-h-0 flex-1">
+              <ErrorBoundary label="Canvas">
+                <StrategyCanvas
+                  strategyId={strategy.id}
+                  initialNodes={initialNodes}
+                  initialEdges={initialEdges}
+                  onSaveSuccess={() => {
+                    setSaveError(null);
                     prevGraphRef.current = null;
-                  }
-                  setHasPendingApply(false);
-                  setSaveStatus("error");
-                }}
-                onSavingChange={setIsCanvasSaving}
-                saveRequestKey={saveRequestKey}
-              />
-            </ErrorBoundary>
+                    setHasPendingApply(false);
+                    setSaveStatus("saved");
+                    setTimeout(() => setSaveStatus("idle"), 2500);
+                  }}
+                  onSaveError={(msg) => {
+                    setSaveError(msg);
+                    if (prevGraphRef.current) {
+                      setAppliedGraph(prevGraphRef.current);
+                      prevGraphRef.current = null;
+                    }
+                    setHasPendingApply(false);
+                    setSaveStatus("error");
+                  }}
+                  onSavingChange={setIsCanvasSaving}
+                  saveRequestKey={saveRequestKey}
+                />
+              </ErrorBoundary>
+            </div>
             <ErrorBoundary label="AI Builder">
-              <AiPromptPanel
+              <AiBuilderPanel
                 open={aiOpen}
                 onClose={() => setAiOpen(false)}
                 onDraft={(g) => {

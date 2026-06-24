@@ -40,6 +40,11 @@ export async function POST(req: NextRequest) {
   // 3. Double-check the generated graph passes schema + structural validation
   const graphValidation = validateGraph(graph);
   if (!graphValidation.valid) {
+    console.error(
+      "[generate-graph] Generated graph failed validation. Draft:",
+      JSON.stringify(draft),
+      "Errors:", graphValidation.errors.map((e) => e.message),
+    );
     return NextResponse.json(
       {
         error: "Generated graph failed validation",

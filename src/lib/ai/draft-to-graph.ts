@@ -69,15 +69,15 @@ function indicatorSourceHandle(id: string): string {
   return MULTI_OUTPUT_DEFAULT_HANDLE[id] ?? "out";
 }
 
-// Sensible default params per indicator (used when draft doesn't specify params)
+// Sensible default params per indicator — keys must match what the indicator builtins read.
 function defaultIndicatorParams(name: string): Record<string, number | string> {
   switch (name.toUpperCase()) {
     case "MACD": return { fast: 12, slow: 26, signal: 9 };
-    case "BOLLINGER": case "BB": return { period: 20, stdDev: 2 };
+    case "BOLLINGER": case "BB": return { period: 20, mult: 2 };       // builtin reads `mult`
     case "STOCHASTIC": case "STOCH": return { kPeriod: 14, dPeriod: 3 };
     case "ATR": case "ADX": return { period: 14 };
-    case "SUPERTREND": return { period: 10, multiplier: 3 };
-    case "KELTNER": return { period: 20, multiplier: 2 };
+    case "SUPERTREND": return { period: 10, mult: 3 };                  // builtin reads `mult`
+    case "KELTNER": return { period: 20, atrPeriod: 10, mult: 2 };     // builtin reads `mult`
     case "DONCHIAN": return { period: 20 };
     case "CCI": return { period: 20 };
     case "PREV_HL": case "PREV HL": return { lookback: 1 };
@@ -89,8 +89,14 @@ function resolveIndicatorParams(
   name: string,
   draft: Record<string, number | string> | undefined
 ): Record<string, number | string> {
-  if (draft && Object.keys(draft).length > 0) return draft;
-  return defaultIndicatorParams(name);
+  const base = (draft && Object.keys(draft).length > 0) ? draft : defaultIndicatorParams(name);
+  // Normalize LLM alias names to the canonical param names the indicator builtins actually read.
+  const out: Record<string, number | string> = {};
+  for (const [k, v] of Object.entries(base)) {
+    if (k === "stdDev" || k === "multiplier") out.mult = v;
+    else out[k] = v;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +246,8 @@ function buildCrossover(
   });
   const srcHandle = indicatorSourceHandle(indicatorId);
 
-  // comparator ">" → price crosses above indicator = crossUp
+  // ">" → crosses above = crossUp; "<" → crosses below = crossDown
+  // ">=" / "<=" / "==" collapse to crossUp — crossover semantics don't support equality
   const direction = cond.comparator === "<" ? "crossDown" : "crossUp";
 
   const crossId = b.id();
@@ -269,12 +276,13 @@ function buildVolumeSpike(
   const volId = b.id();
   b.addNode({ id: volId, type: "volume", position: { x: X_DATA, y: rowY }, data: {} });
 
+  const op = (cond.comparator ?? ">") as ">" | "<" | ">=" | "<=" | "==";
   const cmpId = b.id();
   b.addNode({
     id: cmpId,
     type: "compare",
     position: { x: X_LOGIC, y: rowY },
-    data: { op: ">", rightType: "number", rightValue },
+    data: { op, rightType: "number", rightValue },
   });
   b.addEdge(volId, cmpId);
 

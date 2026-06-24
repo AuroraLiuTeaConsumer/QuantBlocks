@@ -62,6 +62,7 @@ export function AiBuilderPanel({ open, onClose, onDraft, onError }: AiBuilderPan
   const [conversation, setConversation] = useState<AIBuilderConversation>(createInitialConversation);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [nextAction, setNextAction] = useState<AIBuilderNextAction>("ask_clarification");
 
@@ -187,16 +188,46 @@ export function AiBuilderPanel({ open, onClose, onDraft, onError }: AiBuilderPan
     e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
   };
 
-  // In Phase A the generate-graph endpoint doesn't exist yet.
-  // The button is shown so the user can see when the draft is complete,
-  // but it is wired up in Phase B.
+  // LLM's nextAction is the primary signal; isDraftReady() is a safety guard before the API call.
   const canGenerate = nextAction === "ready_to_generate" && isDraftReady(conversation.draft);
 
-  const handleGenerateGraph = () => {
-    if (!canGenerate) return;
-    // Phase B: call /api/ai/builder/generate-graph and pass result to onDraft
-    // For now, inform the user this is coming.
-    setApiError("Graph generation is being built in Phase B.");
+  const handleGenerateGraph = async () => {
+    if (!canGenerate || isGenerating) return;
+
+    setApiError(null);
+    setIsGenerating(true);
+
+    try {
+      const res = await fetch("/api/ai/builder/generate-graph", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draft: conversation.draft }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        const msg = data.error ?? `Generate failed (${res.status})`;
+        const details: string[] = Array.isArray(data.details) ? data.details : [];
+        setApiError(details.length ? `${msg}: ${details.join("; ")}` : msg);
+        return;
+      }
+
+      const { graph } = data as { graph: unknown; warnings: string[] };
+      if (!graph || typeof graph !== "object") {
+        setApiError("Server returned an invalid graph.");
+        return;
+      }
+
+      setConversation((prev) => ({ ...prev, status: "graph_generated" }));
+      onDraft(graph as Parameters<typeof onDraft>[0]);
+      onClose();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unexpected error during generation";
+      setApiError(msg);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const missingCount = requiredMissingCount(conversation.draft.missingFields);
@@ -244,6 +275,11 @@ export function AiBuilderPanel({ open, onClose, onDraft, onError }: AiBuilderPan
           </svg>
         </button>
       </div>
+
+      {/* Draft summary card — shown once the conversation is active */}
+      {conversation.status !== "idle" && (
+        <AiDraftCard draft={conversation.draft} />
+      )}
 
       {/* Messages */}
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
@@ -305,14 +341,23 @@ export function AiBuilderPanel({ open, onClose, onDraft, onError }: AiBuilderPan
         <button
           type="button"
           onClick={handleGenerateGraph}
-          disabled={!canGenerate}
-          title={canGenerate ? "Generate the strategy graph" : "Complete the draft to enable"}
+          disabled={!canGenerate || isGenerating}
+          title={canGenerate ? "Generate the strategy canvas graph" : "Complete the draft to enable"}
           className="flex w-full items-center justify-center gap-1.5 rounded-md bg-accent px-3 py-2 text-xs font-semibold text-white shadow-[0_1px_4px_rgba(41,98,255,0.25)] transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" />
-          </svg>
-          Generate Graph
+          {isGenerating ? (
+            <>
+              <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+              Building graph…
+            </>
+          ) : (
+            <>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" />
+              </svg>
+              Generate Graph
+            </>
+          )}
         </button>
       </div>
 

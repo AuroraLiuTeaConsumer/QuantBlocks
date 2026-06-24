@@ -83,10 +83,10 @@ export function AiDraftCard({ draft }: AiDraftCardProps) {
           {(draft.entryConditions.length > 0 || draft.confirmationConditions.length > 0) && (
             <Section label="Entry">
               {draft.entryConditions.map((c, i) => (
-                <ConditionRow key={i} label="Entry" text={c.description} />
+                <ConditionRow key={c.description || `entry-${i}`} label="Entry" text={c.description} />
               ))}
               {draft.confirmationConditions.map((c, i) => (
-                <ConditionRow key={i} label="Confirm" text={c.description} />
+                <ConditionRow key={c.description || `confirm-${i}`} label="Confirm" text={c.description} />
               ))}
             </Section>
           )}
@@ -95,7 +95,7 @@ export function AiDraftCard({ draft }: AiDraftCardProps) {
           {(draft.exitConditions.length > 0 || draft.riskRules) && (
             <Section label="Exit">
               {draft.exitConditions.map((c, i) => (
-                <ConditionRow key={i} label="Exit" text={c.description} />
+                <ConditionRow key={c.description || `exit-${i}`} label="Exit" text={c.description} />
               ))}
               {draft.riskRules?.stopLoss && (
                 <ConditionRow label="Stop" text={formatStopLoss(draft.riskRules.stopLoss)} />
@@ -113,7 +113,7 @@ export function AiDraftCard({ draft }: AiDraftCardProps) {
           {draft.filters.length > 0 && (
             <Section label="Filters">
               {draft.filters.map((f, i) => (
-                <ConditionRow key={i} label={f.type} text={f.description} />
+                <ConditionRow key={f.description || `filter-${i}`} label={f.type} text={f.description} />
               ))}
             </Section>
           )}
@@ -121,8 +121,8 @@ export function AiDraftCard({ draft }: AiDraftCardProps) {
           {/* Assumptions */}
           {draft.assumptions.length > 0 && (
             <Section label="Assumptions">
-              {draft.assumptions.map((a, i) => (
-                <div key={i} className="text-[11px] text-ink-2">
+              {draft.assumptions.map((a) => (
+                <div key={a} className="text-[11px] text-ink-2">
                   <span className="text-ink-3">•</span> {a}
                 </div>
               ))}
@@ -132,8 +132,8 @@ export function AiDraftCard({ draft }: AiDraftCardProps) {
           {/* Warnings */}
           {draft.warnings.length > 0 && (
             <Section label="Warnings">
-              {draft.warnings.map((w, i) => (
-                <div key={i} className="text-[11px] text-warn">
+              {draft.warnings.map((w) => (
+                <div key={w} className="text-[11px] text-warn">
                   <span>⚠</span> {w}
                 </div>
               ))}

@@ -1,4 +1,5 @@
-import type { StrategyDraft } from "@/types/ai-builder";
+import type { StrategyDraft, StrategyDraftCondition } from "@/types/ai-builder";
+import { TIMEFRAME_MS } from "@/lib/market-data/types";
 
 export type DraftValidationResult = {
   valid: boolean;
@@ -6,7 +7,16 @@ export type DraftValidationResult = {
   warnings: string[];
 };
 
-const VALID_TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h", "1d"] as const;
+// Derived from the market-data registry so this list stays in sync with what
+// the system can actually ingest/backtest — no separate hardcoded duplicate.
+const VALID_TIMEFRAMES = Object.keys(TIMEFRAME_MS);
+
+// A condition is convertible if draft-to-graph.ts can produce a real node for it.
+// Custom conditions are convertible only when they carry an indicator + comparator.
+function isConvertible(cond: StrategyDraftCondition): boolean {
+  if (cond.type !== "custom") return true;
+  return !!(cond.indicator && cond.comparator);
+}
 
 export function validateStrategyDraft(draft: StrategyDraft): DraftValidationResult {
   const errors: string[] = [];
@@ -18,7 +28,7 @@ export function validateStrategyDraft(draft: StrategyDraft): DraftValidationResu
 
   if (!draft.timeframe) {
     errors.push("Timeframe is required");
-  } else if (!(VALID_TIMEFRAMES as readonly string[]).includes(draft.timeframe)) {
+  } else if (!VALID_TIMEFRAMES.includes(draft.timeframe)) {
     errors.push(
       `Invalid timeframe "${draft.timeframe}". Must be one of: ${VALID_TIMEFRAMES.join(", ")}`
     );
@@ -35,6 +45,13 @@ export function validateStrategyDraft(draft: StrategyDraft): DraftValidationResu
       if (!cond.description) {
         errors.push("An entry condition is missing a description");
       }
+    }
+    const convertibleCount = draft.entryConditions.filter(isConvertible).length;
+    if (convertibleCount === 0) {
+      errors.push(
+        "No entry conditions can be converted to graph nodes. " +
+        "Custom conditions require an indicator and comparator — or use indicator_threshold, crossover, price_level, or volume_spike types."
+      );
     }
   }
 

@@ -37,6 +37,8 @@ export type StrategyDraftConditionType =
   | "crossover"
   | "price_level"
   | "volume_spike"
+  | "indicator_crossover"  // Phase D: one indicator's output crosses another output of the SAME indicator
+  | "series_compare"       // Phase D: two numeric series compared (price vs band, indicator vs indicator)
   | "custom";
 
 export type StrategyDraftCondition = {
@@ -48,6 +50,13 @@ export type StrategyDraftCondition = {
   threshold?: number;
   thresholdType?: "fixed" | "indicator_multiple";
   thresholdIndicator?: string;
+  // Phase D fields — advanced multi-output and series-vs-series support
+  indicatorOutput?: string;   // override default output handle for indicator_threshold (e.g. "direction", "adx", "histogram")
+  indicatorOutputA?: string;  // fast/crossing output for indicator_crossover (e.g. "macdLine", "k")
+  indicatorOutputB?: string;  // slow/baseline output for indicator_crossover, or band name for series_compare (e.g. "signalLine", "upper")
+  rightIndicator?: string;    // for series_compare when both sides are indicators (the right-side indicator name)
+  rightParams?: Record<string, number | string>; // params for rightIndicator
+  priceField?: string;        // for series_compare price-vs-band: which price field (default "close")
 };
 
 export type StrategyDraftStopLoss = {

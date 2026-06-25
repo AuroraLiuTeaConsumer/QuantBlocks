@@ -74,8 +74,8 @@ export function graphToStrategyDraft(graph: StrategyGraph): StrategyDraft {
       // Skip empty set_risk nodes (neither field set) to avoid a truthy-but-empty riskRules.
       if (data.slPct != null || data.tpPct != null) {
         riskRules = {
-          stopLoss: data.slPct != null ? { type: "pct", value: data.slPct } : riskRules?.stopLoss,
-          takeProfit: data.tpPct != null ? { type: "pct", value: data.tpPct } : riskRules?.takeProfit,
+          stopLoss: riskRules?.stopLoss ?? (data.slPct != null ? { type: "pct", value: data.slPct } : undefined),
+          takeProfit: riskRules?.takeProfit ?? (data.tpPct != null ? { type: "pct", value: data.tpPct } : undefined),
         };
       }
     }
@@ -201,14 +201,68 @@ function buildCompareCondition(
     const rightNode = rightEdge ? nodeMap.get(rightEdge.source) : undefined;
     const leftDesc = describeSourceNode(sourceNode);
     const rightDesc = rightNode ? describeSourceNode(rightNode) : "another series";
+
+    // Extract right-side info
+    let rightIndicator: string | undefined;
+    let rightParams: Record<string, number | string> | undefined;
+    const indicatorOutputB = rightEdge?.sourceHandle ?? undefined;
+
+    if (rightNode?.type === "indicator") {
+      const d = rightNode.data as { indicatorId: string; params?: Record<string, number | string>; indicatorName?: string };
+      // Use indicatorId (registry key) not indicatorName so NAME_TO_ID can resolve it on re-import
+      rightIndicator = d.indicatorId.toUpperCase();
+      rightParams = d.params;
+    }
+
+    // Left-side info
+    let leftIndicatorKey: string | undefined;
+    let leftParams: Record<string, number | string> | undefined;
+    const indicatorOutput = leftEdge?.sourceHandle ?? undefined;
+
+    if (sourceNode.type === "indicator") {
+      const d = sourceNode.data as { indicatorId: string; params?: Record<string, number | string>; indicatorName?: string };
+      leftIndicatorKey = d.indicatorId.toUpperCase();
+      leftParams = d.params;
+    }
+
+    if (sourceNode.type === "price" && rightIndicator) {
+      // price vs indicator band — canonical series_compare case
+      // Preserve the price field so the round-trip rebuilds the same node (default "close")
+      const priceField = (sourceNode.data as { field?: string }).field ?? "close";
+      return {
+        type: "series_compare",
+        description: `${leftDesc} ${op} ${rightIndicator}${indicatorOutputB ? ` (${indicatorOutputB})` : ""}`,
+        indicator: rightIndicator,
+        params: rightParams,
+        comparator: op,
+        indicatorOutputB,
+        priceField,
+      };
+    }
+
+    if (leftIndicatorKey && rightIndicator) {
+      // indicator A vs indicator B
+      return {
+        type: "series_compare",
+        description: `${leftDesc} ${op} ${rightDesc}`,
+        indicator: leftIndicatorKey,
+        params: leftParams,
+        comparator: op,
+        indicatorOutput,
+        rightIndicator,
+        rightParams,
+        indicatorOutputB,
+      };
+    }
+
+    // Could not identify both sides — fall back to custom
     warnings.push(
-      `Series-vs-series compare (${leftDesc} ${op} ${rightDesc}) imported as a custom condition — verify the threshold after import.`
+      `Series-vs-series compare (${leftDesc} ${op} ${rightDesc}) imported as custom — verify after import.`
     );
     return {
       type: "custom",
       description: `${leftDesc} ${op} ${rightDesc}`,
       comparator: op,
-      thresholdType: "indicator_multiple",
     };
   }
 
@@ -233,7 +287,8 @@ function buildCompareCondition(
         params?: Record<string, number | string>;
         indicatorName?: string;
       };
-      const name = indData.indicatorName ?? indData.indicatorId.toUpperCase();
+      const displayName = indData.indicatorName ?? indData.indicatorId.toUpperCase();
+      const indicatorKey = indData.indicatorId.toUpperCase(); // stable for NAME_TO_ID lookup on re-import
       const params = indData.params ?? {};
       const paramStr = Object.entries(params)
         .filter(([, v]) => v != null)
@@ -241,8 +296,8 @@ function buildCompareCondition(
         .join(", ");
       return {
         type: "indicator_threshold",
-        description: `${name}(${paramStr || "default"}) ${op} ${threshold ?? "?"}`,
-        indicator: name,
+        description: `${displayName}(${paramStr || "default"}) ${op} ${threshold ?? "?"}`,
+        indicator: indicatorKey,
         params,
         comparator: op,
         threshold,
@@ -288,10 +343,36 @@ function buildCrossCondition(
   const crossData = node.data as { direction: "crossUp" | "crossDown" };
   const edges = incomingEdgesMap.get(nodeId) ?? [];
 
+  const aEdge = edges.find((e) => e.targetHandle === "a");
   const bEdge = edges.find((e) => e.targetHandle === "b");
+
+  // Detect same-source indicator crossover (e.g. MACD line vs signal line from one indicator node)
+  if (aEdge && bEdge && aEdge.source === bEdge.source) {
+    const sourceNode = nodeMap.get(aEdge.source);
+    if (sourceNode?.type === "indicator") {
+      const d = sourceNode.data as { indicatorId: string; params?: Record<string, number | string>; indicatorName?: string };
+      const displayName = d.indicatorName ?? d.indicatorId.toUpperCase();
+      const indicatorKey = d.indicatorId.toUpperCase(); // stable for NAME_TO_ID lookup on re-import
+      const paramStr = Object.entries(d.params ?? {})
+        .filter(([, v]) => v != null)
+        .map(([k, v]) => `${k}:${v}`)
+        .join(", ");
+      return {
+        type: "indicator_crossover",
+        description: `${displayName}(${paramStr || "default"}) ${crossData.direction === "crossUp" ? "bullish" : "bearish"} crossover`,
+        indicator: indicatorKey,
+        params: d.params ?? {},
+        comparator: crossData.direction === "crossUp" ? ">" : "<",
+        indicatorOutputA: aEdge.sourceHandle,
+        indicatorOutputB: bEdge.sourceHandle,
+      };
+    }
+  }
+
   const bSourceNode = bEdge ? nodeMap.get(bEdge.source) : undefined;
 
-  let indName = "SMA";
+  let indDisplayName = "SMA";
+  let indKey = "SMA"; // stable for NAME_TO_ID lookup on re-import
   let indParams: Record<string, number | string> = { period: 20 };
   let resolved = false;
 
@@ -301,11 +382,13 @@ function buildCrossCondition(
       params?: Record<string, number | string>;
       indicatorName?: string;
     };
-    indName = d.indicatorName ?? d.indicatorId.toUpperCase();
+    indDisplayName = d.indicatorName ?? d.indicatorId.toUpperCase();
+    indKey = d.indicatorId.toUpperCase();
     indParams = d.params ?? {};
     resolved = true;
   } else if (bSourceNode?.type === "rsi") {
-    indName = "RSI";
+    indDisplayName = "RSI";
+    indKey = "RSI";
     indParams = { period: (bSourceNode.data as { period?: number }).period ?? 14 };
     resolved = true;
   }
@@ -324,8 +407,8 @@ function buildCrossCondition(
 
   return {
     type: "crossover",
-    description: `Price ${direction} ${indName}(${paramStr || "default"})`,
-    indicator: indName,
+    description: `Price ${direction} ${indDisplayName}(${paramStr || "default"})`,
+    indicator: indKey,
     params: indParams,
     comparator: crossData.direction === "crossUp" ? ">" : "<",
   };

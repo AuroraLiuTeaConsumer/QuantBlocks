@@ -186,7 +186,9 @@ function buildIndicatorThreshold(
       position: { x: X_DATA, y: rowY },
       data: { indicatorId, params, indicatorName: name },
     });
-    srcHandle = indicatorSourceHandle(indicatorId);
+    // cond.indicatorOutput lets the AI (or graph-to-draft) select a specific output handle,
+    // e.g. "direction" for Supertrend, "adx" for ADX, "histogram" for MACD.
+    srcHandle = cond.indicatorOutput ?? indicatorSourceHandle(indicatorId);
   }
 
   const cmpId = b.id();
@@ -289,6 +291,118 @@ function buildVolumeSpike(
   return { outputNodeId: cmpId };
 }
 
+function buildIndicatorCrossover(
+  cond: StrategyDraftCondition,
+  b: GraphBuilder,
+  warnings: string[]
+): ChainResult {
+  if (!cond.indicatorOutputA || !cond.indicatorOutputB) {
+    warnings.push(
+      `indicator_crossover for "${cond.description}" is missing output handles — falling back to indicator_threshold`
+    );
+    return buildIndicatorThreshold({ ...cond, type: "indicator_threshold" }, b, warnings);
+  }
+
+  const rowA = b.allocateRow(); // position for the indicator node
+  const rowB = b.allocateRow(); // visual spacing slot (no extra node)
+  const crossY = Math.round((rowA + rowB) / 2);
+
+  const name = (cond.indicator ?? "MACD").trim();
+  const indicatorId = nameToIndicatorId(name);
+  const params = resolveIndicatorParams(name, cond.params as Record<string, number | string> | undefined);
+
+  // Single indicator node — two outgoing edges with different sourceHandles
+  const indId = b.id();
+  b.addNode({
+    id: indId,
+    type: "indicator",
+    position: { x: X_DATA, y: rowA },
+    data: { indicatorId, params, indicatorName: name },
+  });
+
+  const direction = cond.comparator === "<" ? "crossDown" : "crossUp";
+  const crossId = b.id();
+  b.addNode({ id: crossId, type: "cross", position: { x: X_LOGIC, y: crossY }, data: { direction } });
+
+  b.addEdge(indId, crossId, cond.indicatorOutputA, "a"); // fast output → a
+  b.addEdge(indId, crossId, cond.indicatorOutputB, "b"); // slow output → b
+
+  return { outputNodeId: crossId };
+}
+
+function buildSeriesCompare(
+  cond: StrategyDraftCondition,
+  b: GraphBuilder,
+  warnings: string[]
+): ChainResult {
+  const rowA = b.allocateRow();
+  const rowB = b.allocateRow();
+  const cmpY = Math.round((rowA + rowB) / 2);
+  const op = (cond.comparator ?? ">") as ">" | "<" | ">=" | "<=" | "==";
+
+  let leftId: string;
+  let leftSrcHandle: string | undefined;
+
+  if (cond.rightIndicator) {
+    // Both sides are indicators
+    const leftName = (cond.indicator ?? "SMA").trim();
+    const leftIndId = nameToIndicatorId(leftName);
+    const leftParams = resolveIndicatorParams(leftName, cond.params as Record<string, number | string> | undefined);
+    leftId = b.id();
+    b.addNode({
+      id: leftId,
+      type: "indicator",
+      position: { x: X_DATA, y: rowA },
+      data: { indicatorId: leftIndId, params: leftParams, indicatorName: leftName },
+    });
+    leftSrcHandle = cond.indicatorOutput ?? indicatorSourceHandle(leftIndId);
+    if (!cond.indicatorOutput && MULTI_OUTPUT_DEFAULT_HANDLE[leftIndId]) {
+      warnings.push(
+        `series_compare "${cond.description}" has no indicatorOutput for ${leftName} — using default output "${indicatorSourceHandle(leftIndId)}". Verify the output on canvas.`
+      );
+    }
+  } else {
+    // Left is price vs indicator band — priceField preserved from graph-to-draft round-trip
+    leftId = b.id();
+    const priceField = (cond.priceField ?? "close") as "open" | "high" | "low" | "close";
+    b.addNode({ id: leftId, type: "price", position: { x: X_DATA, y: rowA }, data: { field: priceField } });
+  }
+
+  const rightName = (cond.rightIndicator ?? cond.indicator ?? "SMA").trim();
+  const rightIndId = nameToIndicatorId(rightName);
+  const rightParamsRaw = cond.rightIndicator
+    ? (cond.rightParams as Record<string, number | string> | undefined)
+    : (cond.params as Record<string, number | string> | undefined);
+  const rightParams = resolveIndicatorParams(rightName, rightParamsRaw ?? undefined);
+
+  const rightId = b.id();
+  b.addNode({
+    id: rightId,
+    type: "indicator",
+    position: { x: X_DATA, y: rowB },
+    data: { indicatorId: rightIndId, params: rightParams, indicatorName: rightName },
+  });
+  const rightSrcHandle = cond.indicatorOutputB ?? indicatorSourceHandle(rightIndId);
+
+  if (!cond.indicatorOutputB) {
+    warnings.push(
+      `series_compare "${cond.description}" has no indicatorOutputB — using default output for ${rightName}. Verify the band on canvas.`
+    );
+  }
+
+  const cmpId = b.id();
+  b.addNode({
+    id: cmpId,
+    type: "compare",
+    position: { x: X_LOGIC, y: cmpY },
+    data: { op, rightType: "series" },
+  });
+  b.addEdge(leftId, cmpId, leftSrcHandle, "left");
+  b.addEdge(rightId, cmpId, rightSrcHandle, "right");
+
+  return { outputNodeId: cmpId };
+}
+
 function buildConditionChain(
   cond: StrategyDraftCondition,
   b: GraphBuilder,
@@ -303,6 +417,10 @@ function buildConditionChain(
       return buildCrossover(cond, b, warnings);
     case "volume_spike":
       return buildVolumeSpike(cond, b, warnings);
+    case "indicator_crossover":
+      return buildIndicatorCrossover(cond, b, warnings);
+    case "series_compare":
+      return buildSeriesCompare(cond, b, warnings);
     case "custom":
       if (cond.indicator && cond.comparator) {
         return buildIndicatorThreshold(cond, b, warnings);

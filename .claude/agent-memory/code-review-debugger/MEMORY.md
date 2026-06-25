@@ -7,3 +7,6 @@
 - [Draft<->Graph round-trip lossy](project_draft-graph-roundtrip-lossy.md) — intentional losses (entry/confirm merge, NOT skip) vs real risks (compare input ordering, fabricated SMA20).
 - [validate-draft warning duplication](project_validate-draft-warning-duplication.md) — structural warnings seeded from draft.warnings + pushed undeduped; no-risk warning ignores exitConditions.
 - [graph-to-draft lossy traversal](project_graph-to-draft-lossy-traversal.md) — importer: order-dependent compare source, dropped series thresholds, AND/OR flattened, multi set_risk overwritten.
+- [Phase D round-trip naming](project_phase-d-roundtrip-naming.md) — display-name written back can't re-map (prev_hl), price field dropped; engine itself is round-trip-safe.
+- [LLM-JSON parsing](project_llm-json-parsing.md) — "non-JSON output" has TWO causes: fence/preamble (parser) AND truncation (max_tokens too low, stop_reason=max_tokens).
+- [Generate Graph button gating](project_generate-graph-button-gating.md) — canGenerate must gate on isDraftReady alone, not the LLM's nextAction hint (revision-mode never enabled).

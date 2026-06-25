@@ -56,8 +56,9 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     graph,
-    // draft.warnings = LLM's own notes; draftValidation.warnings = structural checks;
-    // warnings = converter notes. Kept separate so none accumulate across validate calls.
-    warnings: [...draft.warnings, ...draftValidation.warnings, ...warnings],
+    // warnings = converter notes, already seeded with the LLM's own draft.warnings
+    // inside draftToStrategyGraph(); draftValidation.warnings = structural checks.
+    // Do NOT spread draft.warnings again here or LLM warnings would be duplicated.
+    warnings: [...draftValidation.warnings, ...warnings],
   });
 }

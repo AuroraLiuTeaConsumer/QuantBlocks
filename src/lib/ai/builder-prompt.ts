@@ -40,7 +40,7 @@ warnings: string[]        // vague logic, overfit risk, lookahead bias concerns
 
 Each StrategyDraftCondition looks like:
 {
-  "type": "indicator_threshold" | "crossover" | "price_level" | "volume_spike" | "custom",
+  "type": "indicator_threshold" | "crossover" | "price_level" | "volume_spike" | "indicator_crossover" | "series_compare" | "custom",
   "description": "<human-readable summary, e.g. RSI(14) < 30>",
   "indicator": "<name, e.g. RSI, SMA, EMA, ATR, Bollinger>",
   "params": { "period": 14 },
@@ -49,6 +49,82 @@ Each StrategyDraftCondition looks like:
   "thresholdType": "fixed" | "indicator_multiple",
   "thresholdIndicator": "<e.g. SMA(volume, 20)>"
 }
+
+---
+
+## Advanced condition types
+
+Use these for complex strategies that basic indicator_threshold or crossover cannot express.
+
+**indicator_crossover** — one output of a multi-output indicator crosses another output of the SAME indicator.
+Use for: MACD line/signal crossover, Stochastic %K/%D crossover.
+
+{
+  "type": "indicator_crossover",
+  "description": "MACD line crosses above signal line",
+  "indicator": "MACD",
+  "params": { "fast": 12, "slow": 26, "signal": 9 },
+  "comparator": ">",
+  "indicatorOutputA": "macdLine",
+  "indicatorOutputB": "signalLine"
+}
+
+Stochastic K crossing above D: indicatorOutputA = "k", indicatorOutputB = "d", comparator = ">".
+
+**series_compare** — compare two live number series (price vs indicator band, or indicator vs indicator).
+Use for: price above Bollinger upper, price below Keltner lower, price above Donchian upper channel.
+
+When left is price(close) and right is a band:
+{
+  "type": "series_compare",
+  "description": "Price close above Bollinger upper band",
+  "comparator": ">",
+  "indicator": "Bollinger",
+  "params": { "period": 20, "mult": 2 },
+  "indicatorOutputB": "upper"
+}
+
+When both sides are indicators:
+{
+  "type": "series_compare",
+  "description": "RSI above SMA of RSI",
+  "indicator": "RSI",
+  "params": { "period": 14 },
+  "indicatorOutput": "out",
+  "comparator": ">",
+  "rightIndicator": "SMA",
+  "rightParams": { "period": 20 },
+  "indicatorOutputB": "out"
+}
+
+**indicatorOutput field on indicator_threshold** — select a specific output of a multi-output indicator.
+Use for: Supertrend direction, ADX strength, Elder Ray bull power, MACD histogram.
+
+{
+  "type": "indicator_threshold",
+  "description": "Supertrend is bullish (direction > 0)",
+  "indicator": "Supertrend",
+  "params": { "period": 10, "mult": 3 },
+  "comparator": ">",
+  "threshold": 0,
+  "indicatorOutput": "direction"
+}
+
+Other examples:
+- ADX strength > 25: indicator = "ADX", indicatorOutput = "adx", threshold = 25, comparator = ">"
+- MACD histogram > 0: indicator = "MACD", indicatorOutput = "histogram", threshold = 0, comparator = ">"
+- Elder Ray bull power > 0: indicator = "Elder Ray", indicatorOutput = "bullPower", threshold = 0, comparator = ">"
+
+Available multi-output indicator field names:
+- MACD: "macdLine", "signalLine", "histogram"
+- Bollinger: "upper", "middle", "lower"
+- ADX: "adx", "diPlus", "diMinus"
+- Stochastic: "k", "d"
+- Donchian: "upper", "middle", "lower"
+- Keltner: "upper", "middle", "lower"
+- Supertrend: "supertrend" (price), "direction" (1 = up, -1 = down)
+- prev_hl: "high", "low"
+- Elder Ray: "bullPower", "bearPower"
 
 ---
 

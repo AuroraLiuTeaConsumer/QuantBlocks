@@ -50,7 +50,8 @@ export function validateStrategyDraft(draft: StrategyDraft): DraftValidationResu
     if (convertibleCount === 0) {
       errors.push(
         "No entry conditions can be converted to graph nodes. " +
-        "Custom conditions require an indicator and comparator — or use indicator_threshold, crossover, price_level, or volume_spike types."
+        "Custom conditions require an indicator and comparator — or use indicator_threshold, " +
+        "crossover, price_level, volume_spike, indicator_crossover, or series_compare types."
       );
     }
   }

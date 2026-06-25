@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { validateGraph } from "@/lib/strategy/validator";
 import { SYSTEM_PROMPT } from "@/lib/ai/strategy-prompt";
+import { parseLLMJsonObject } from "@/lib/ai/parse-llm-json";
 
 const MODEL = "claude-sonnet-4-6";
 const MAX_TOKENS = 2048;
@@ -45,7 +46,7 @@ export async function POST(req: NextRequest) {
     const msg = err instanceof Error ? err.message : "Anthropic API error";
     return NextResponse.json({ error: `AI request failed: ${msg}` }, { status: 500 });
   }
-  let parsed = tryParseJson(raw);
+  let parsed = parseLLMJsonObject(raw);
 
   if (!parsed) {
     return NextResponse.json(
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
       const msg = err instanceof Error ? err.message : "Anthropic API error";
       return NextResponse.json({ error: `AI retry request failed: ${msg}` }, { status: 500 });
     }
-    parsed = tryParseJson(raw);
+    parsed = parseLLMJsonObject(raw);
 
     if (!parsed) {
       return NextResponse.json(
@@ -124,18 +125,3 @@ async function callClaude(client: Anthropic, userContent: string): Promise<strin
     .join("");
 }
 
-function tryParseJson(text: string): Record<string, unknown> | null {
-  // Strip markdown code fences if the model wrapped the JSON
-  const stripped = text
-    .replace(/^```(?:json)?\s*/m, "")
-    .replace(/\s*```\s*$/m, "")
-    .trim();
-
-  try {
-    const val = JSON.parse(stripped);
-    if (val && typeof val === "object" && !Array.isArray(val)) return val;
-    return null;
-  } catch {
-    return null;
-  }
-}

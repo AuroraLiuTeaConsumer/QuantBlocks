@@ -94,9 +94,10 @@ export function AiBuilderPanel({ open, onClose, onDraft, onError, canvasGraph }:
       return;
     }
     if (sessionInitialized.current) return;
-    sessionInitialized.current = true;
 
     if (!canvasGraph || canvasGraph.nodes.length === 0) return;
+
+    sessionInitialized.current = true;
 
     const importedDraft = graphToStrategyDraft(canvasGraph);
     const revisionWelcome: AIBuilderMessage = {
@@ -228,8 +229,14 @@ export function AiBuilderPanel({ open, onClose, onDraft, onError, canvasGraph }:
     e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
   };
 
-  // LLM's nextAction is the primary signal; isDraftReady() is a safety guard before the API call.
-  const canGenerate = nextAction === "ready_to_generate" && isDraftReady(conversation.draft);
+  // Draft structural completeness is the authoritative gate — the generate-graph
+  // route re-validates it server-side anyway, so enabling on isDraftReady can
+  // never produce an invalid graph. The LLM's nextAction must NOT be a required
+  // condition: in revision mode (draft imported complete from the canvas) and
+  // whenever the LLM lags on emitting "ready_to_generate", the draft can be
+  // fully complete while nextAction is still "ask_clarification" — which
+  // previously left the button permanently disabled despite a ready draft.
+  const canGenerate = isDraftReady(conversation.draft);
 
   const handleGenerateGraph = async () => {
     if (!canGenerate || isGenerating) return;

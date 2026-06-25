@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { BUILDER_SYSTEM_PROMPT } from "@/lib/ai/builder-prompt";
+import { parseLLMJsonObject } from "@/lib/ai/parse-llm-json";
 import { EMPTY_DRAFT } from "@/lib/ai/ai-builder-state";
 import type {
   BuilderMessageRequest,
@@ -9,7 +10,11 @@ import type {
 } from "@/types/ai-builder";
 
 const MODEL = "claude-sonnet-4-6";
-const MAX_TOKENS = 1024;
+// The final turn must emit a full strategy summary (prose `message`) PLUS a
+// complete `draftUpdate` (entry/exit/risk conditions) in a single JSON object.
+// 1024 tokens truncated that payload mid-JSON, which made the parser fail and
+// surfaced as "Model returned non-JSON output." Give the draft room to breathe.
+const MAX_TOKENS = 4096;
 
 /**
  * POST /api/ai/builder/message
@@ -92,6 +97,7 @@ export async function POST(req: NextRequest) {
   }
 
   let raw: string;
+  let stopReason: Anthropic.Message["stop_reason"];
   try {
     const response = await client.messages.create({
       model: MODEL,
@@ -111,6 +117,7 @@ export async function POST(req: NextRequest) {
       messages: claudeMessages,
     });
 
+    stopReason = response.stop_reason;
     raw = response.content
       .filter((b): b is Anthropic.TextBlock => b.type === "text")
       .map((b) => b.text)
@@ -120,7 +127,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `AI request failed: ${msg}` }, { status: 500 });
   }
 
-  const parsed = tryParseJson(raw);
+  // If the model hit the output cap, the JSON envelope is cut off mid-object and
+  // can never parse. Report this distinctly instead of the generic "non-JSON"
+  // message so it is not confused with a formatting problem.
+  if (stopReason === "max_tokens") {
+    return NextResponse.json(
+      { error: "Response was too long and got cut off. Please try again." },
+      { status: 500 }
+    );
+  }
+
+  const parsed = parseLLMJsonObject(raw);
   if (!parsed) {
     return NextResponse.json(
       { error: "Model returned non-JSON output. Please try again." },
@@ -131,7 +148,7 @@ export async function POST(req: NextRequest) {
   const responseBody: BuilderMessageResponse = {
     message: typeof parsed.message === "string" ? parsed.message : "I couldn't process that. Could you rephrase?",
     quickReplies: Array.isArray(parsed.quickReplies) ? parsed.quickReplies : undefined,
-    draftUpdate: parsed.draftUpdate && typeof parsed.draftUpdate === "object" ? parsed.draftUpdate : {},
+    draftUpdate: parsed.draftUpdate && typeof parsed.draftUpdate === "object" && !Array.isArray(parsed.draftUpdate) ? parsed.draftUpdate : {},
     missingFields: Array.isArray(parsed.missingFields) ? parsed.missingFields : [],
     nextAction: isValidNextAction(parsed.nextAction) ? parsed.nextAction : "ask_clarification",
     conversationStatus: isValidConversationStatus(parsed.conversationStatus)
@@ -145,20 +162,6 @@ export async function POST(req: NextRequest) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function tryParseJson(text: string): Record<string, unknown> | null {
-  const stripped = text
-    .replace(/^```(?:json)?\s*/m, "")
-    .replace(/\s*```\s*$/m, "")
-    .trim();
-  try {
-    const val = JSON.parse(stripped);
-    if (val && typeof val === "object" && !Array.isArray(val)) return val;
-    return null;
-  } catch {
-    return null;
-  }
-}
 
 // Phase A: the system prompt only emits these two values.
 // "update_draft" and "confirm_graph" are reserved for future phases.

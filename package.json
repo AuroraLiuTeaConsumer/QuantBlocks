@@ -22,6 +22,7 @@
     "@prisma/client": "^6.3.0",
     "@xyflow/react": "^12.10.0",
     "ccxt": "^4.5.54",
+    "ioredis": "^5.11.1",
     "lightweight-charts": "^5.1.0",
     "next": "^15.1.0",
     "pg": "^8.21.0",

@@ -47,6 +47,8 @@ for (const f of [".env.local", ".env"]) {
 
 import { getTimescaleRepo } from "../../lib/market-data/storage/timescale.repo";
 import type { Candle, Timeframe } from "../../lib/market-data/types";
+import { getRedisPublisher } from "../../lib/redis/client";
+import { candleChannel, encodeCandleMsg } from "../../lib/redis/channels";
 
 // ─── Arg parsing ─────────────────────────────────────────────────────────────
 
@@ -176,6 +178,14 @@ function connect(symbols: string[], timeframe: string) {
     try {
       const repo = getTimescaleRepo();
       const inserted = await repo.insertCandles([candle]);
+      getRedisPublisher()
+        .publish(
+          candleChannel("binance", ccxtSymbol, timeframe),
+          encodeCandleMsg({ exchange: "binance", symbol: ccxtSymbol, timeframe, openTime: candle.openTime.getTime(), open: candle.open, high: candle.high, low: candle.low, close: candle.close }),
+        )
+        .catch((err: unknown) => {
+          console.warn(`[ws-ingest] Redis publish failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
       const ts = openTime.toISOString().slice(0, 19).replace("T", " ");
       console.log(
         `[ws-ingest] ${inserted > 0 ? "✓" : "~"} ${ccxtSymbol} ${ts} close=${candle.close}`,

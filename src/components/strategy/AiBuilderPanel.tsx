@@ -5,7 +5,6 @@ import type { StrategyGraph } from "@/lib/strategy/graphTypes";
 import type {
   AIBuilderConversation,
   AIBuilderMessage,
-  AIBuilderNextAction,
 } from "@/types/ai-builder";
 import {
   EMPTY_DRAFT,
@@ -66,7 +65,6 @@ export function AiBuilderPanel({ open, onClose, onDraft, onError, canvasGraph }:
   const [isLoading, setIsLoading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
-  const [nextAction, setNextAction] = useState<AIBuilderNextAction>("ask_clarification");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -115,7 +113,6 @@ export function AiBuilderPanel({ open, onClose, onDraft, onError, canvasGraph }:
       draft: importedDraft,
       messages: [revisionWelcome],
     }));
-    setNextAction("ask_clarification");
   }, [open, canvasGraph]);
 
   // Close on Escape
@@ -178,7 +175,6 @@ export function AiBuilderPanel({ open, onClose, onDraft, onError, canvasGraph }:
         quickReplies,
         draftUpdate,
         missingFields,
-        nextAction: newNextAction,
         conversationStatus,
       } = data;
 
@@ -196,7 +192,6 @@ export function AiBuilderPanel({ open, onClose, onDraft, onError, canvasGraph }:
         missingFields: Array.isArray(missingFields) ? missingFields : currentDraft.missingFields,
       }));
 
-      setNextAction(newNextAction ?? "ask_clarification");
       setConversation((prev) => ({
         ...prev,
         // Preserve "revising" — the server validator never emits it, so the

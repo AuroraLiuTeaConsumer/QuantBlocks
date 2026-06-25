@@ -54,9 +54,9 @@ export function mergeDraftUpdate(
 ): StrategyDraft {
   const next = { ...current };
 
-  if ("symbol" in update) next.symbol = update.symbol;
-  if ("timeframe" in update) next.timeframe = update.timeframe;
-  if ("direction" in update) next.direction = update.direction;
+  if (typeof update.symbol === "string") next.symbol = update.symbol;
+  if (typeof update.timeframe === "string") next.timeframe = update.timeframe;
+  if (update.direction === "long" || update.direction === "short" || update.direction === "both") next.direction = update.direction;
 
   if ("riskRules" in update) {
     next.riskRules = update.riskRules
@@ -79,9 +79,9 @@ export function mergeDraftUpdate(
 
 // ---------------------------------------------------------------------------
 // isDraftReady
-// Thin client-side safety guard — used before calling /api/ai/builder/generate-graph.
-// The LLM's nextAction === "ready_to_generate" is the authoritative UI signal;
-// this function only prevents calling the generate endpoint with an incomplete draft.
+// Authoritative gate for the "Generate Graph" button and the generate-graph API call.
+// The generate-graph route re-validates server-side, so enabling on structural
+// completeness alone can never produce an invalid graph.
 // ---------------------------------------------------------------------------
 
 export function isDraftReady(draft: StrategyDraft): boolean {

@@ -140,7 +140,7 @@ export async function POST(req: NextRequest) {
   const parsed = parseLLMJsonObject(raw);
   if (!parsed) {
     return NextResponse.json(
-      { error: "Model returned non-JSON output. Please try again." },
+      { error: "The AI's response couldn't be read — your draft is unchanged. Please resend your message." },
       { status: 500 }
     );
   }

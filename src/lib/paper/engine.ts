@@ -28,6 +28,7 @@ export type SessionSnapshot = {
   barCursor: string | null; // ISO timestamp of last replayed candle
   startedAt: string | null;
   updatedAt: string;
+  lastBar?: { time: number; open: number; high: number; low: number; close: number };
 };
 
 /** Minimal DB row shape (matches Prisma PaperSession). */

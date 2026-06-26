@@ -11,3 +11,4 @@
 - [LLM-JSON parsing](project_llm-json-parsing.md) — "non-JSON output" has TWO causes: fence/preamble (parser) AND truncation (max_tokens too low, stop_reason=max_tokens).
 - [Generate Graph button gating](project_generate-graph-button-gating.md) — canGenerate must gate on isDraftReady alone, not the LLM's nextAction hint (revision-mode never enabled).
 - [Paper advance concurrency](project_paper-advance-concurrency.md) — advanceSession optimistic-lock + cursor pre-filter contract; regression risks when refactoring the poll path.
+- [Paper snapshot type divergence](project_paper-snapshot-type-divergence.md) — engine SessionSnapshot (no lastBar) vs PaperTradingPanel local type; SSE path casts across them, drops candles.

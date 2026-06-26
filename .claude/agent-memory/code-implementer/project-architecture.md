@@ -8,14 +8,16 @@ metadata:
 Stack: Next.js 15 App Router, TypeScript, Prisma 6 (PostgreSQL), TimescaleDB (same Postgres instance, raw SQL — NOT Prisma-managed), Node 24, tsx CLI runner, Vitest.
 
 Key module locations:
-- Redis client/channels: src/lib/redis/client.ts, src/lib/redis/channels.ts
-- Paper trading engine: src/lib/paper/advance.ts (advanceSession), src/lib/paper/engine.ts
+- Redis client/channels: src/lib/redis/client.ts (createRedisSubscriber, getRedisPublisher), src/lib/redis/channels.ts (sessionChannel, candleChannel)
+- Paper trading engine: src/lib/paper/advance.ts (advanceSession), src/lib/paper/engine.ts (toSnapshot, SessionRow, SessionSnapshot)
 - Paper session registry: src/lib/paper/registry.ts (added in paper-worker phase)
 - Market data types + resolveInstrument: src/lib/market-data/types.ts
 - TimescaleDB repo (queryCandles method): src/lib/market-data/storage/timescale.repo.ts
 - Background jobs: src/server/jobs/ (ws-ingest.job.ts, ingest-candles.job.ts, paper-worker.job.ts)
 - Prisma schema: prisma/schema.prisma
 - Raw SQL migrations for Prisma fields: db/migrations/prisma-raw/
+- SSE stream route: src/app/api/paper/[sessionId]/stream/route.ts (force-dynamic, runtime=nodejs)
+- SSE client hook: src/components/strategy/usePaperStream.ts (gated by NEXT_PUBLIC_PAPER_STREAM=true)
 
 TimescaleDB candle data lives in raw SQL schema (db/migrations/timescale/); NOT Prisma-managed.
 Prisma-raw migrations: manual SQL files applied via `npx prisma db execute --stdin`, then `prisma migrate resolve --applied`, then `prisma generate`.

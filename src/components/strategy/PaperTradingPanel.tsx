@@ -7,6 +7,7 @@ import {
   type ChartMarker,
   type BarItem,
 } from "./TwoPaneChart";
+import { usePaperStream } from "./usePaperStream";
 
 const POLL_SESSION_MS = 1000;
 const POLL_TRADES_MS = 3000;
@@ -235,6 +236,26 @@ export function PaperTradingPanel({
       tradePollRef.current = null;
     }
   }, []);
+
+  // SSE push: when NEXT_PUBLIC_PAPER_STREAM is enabled, receive snapshots
+  // without waiting for the next poll interval. The poll loop remains active
+  // as a fallback — if SSE is off or errors, streaming=false and poll owns
+  // all updates. When SSE is healthy both paths fire, which is harmless.
+  //
+  // The engine's SessionSnapshot uses status: string (broad), while the local
+  // type narrows it to a union — cast to align with the component's type.
+  const { streaming } = usePaperStream(session?.id ?? null, (snap) => {
+    const localSnap = snap as unknown as SessionSnapshot;
+    // Mirror the poll loop's stale-state guard: a late "running" nudge must
+    // not revert a session that has already reached a terminal status.
+    setSession((prev) =>
+      prev?.status !== "running" && localSnap.status === "running" ? prev : localSnap
+    );
+    if (localSnap.status === "running") appendFromSnapshot(localSnap);
+    if (localSnap.status !== "running") stopPolling();
+  });
+  // streaming is available for future UI indicators (e.g. a live badge).
+  void streaming;
 
   const pollSession = useCallback(
     async (sid: string) => {

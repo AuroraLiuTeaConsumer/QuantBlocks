@@ -8,6 +8,7 @@ import { getRedisPublisher, createRedisSubscriber } from "../../lib/redis/client
 import { candleChannel, sessionChannel, decodeCandleMsg } from "../../lib/redis/channels";
 import { getActiveSessions, getWorkerSubscriptions } from "../../lib/paper/registry";
 import { advanceSession } from "../../lib/paper/advance";
+import type { LastBar } from "../../lib/paper/advance";
 import { getTimescaleRepo } from "../../lib/market-data/storage/timescale.repo";
 import { resolveInstrument, isTimeframe } from "../../lib/market-data/types";
 import type { Exchange, Timeframe } from "../../lib/market-data/types";
@@ -36,11 +37,11 @@ function drainInFlight(): Promise<void> {
   return new Promise((resolve) => { drainResolve = resolve; });
 }
 
-function publishAdvanced(sessionId: string, updatedAt: Date): void {
+function publishAdvanced(sessionId: string, updatedAt: Date, lastBar: LastBar | null): void {
   publisher
     .publish(
       sessionChannel(sessionId),
-      JSON.stringify({ v: 1, type: "advanced", updatedAt }),
+      JSON.stringify({ v: 1, type: "advanced", updatedAt, lastBar }),
     )
     .catch((err: unknown) => {
       console.warn("[paper-worker] publish error:", err instanceof Error ? err.message : String(err));
@@ -98,7 +99,7 @@ subscriber.on("message", async (_channel: string, raw: string) => {
         // in advanceSession ensures only one writer wins per bar.
         const result = await advanceSession(sessionId, [bar]);
         if (result.kind === "advanced") {
-          publishAdvanced(sessionId, result.updatedAt);
+          publishAdvanced(sessionId, result.updatedAt, result.lastBar);
         }
       } catch (err) {
         console.warn("[paper-worker] advanceSession error for", sessionId, ":", err instanceof Error ? err.message : String(err));

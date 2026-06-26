@@ -10,3 +10,4 @@
 - [Phase D round-trip naming](project_phase-d-roundtrip-naming.md) — display-name written back can't re-map (prev_hl), price field dropped; engine itself is round-trip-safe.
 - [LLM-JSON parsing](project_llm-json-parsing.md) — "non-JSON output" has TWO causes: fence/preamble (parser) AND truncation (max_tokens too low, stop_reason=max_tokens).
 - [Generate Graph button gating](project_generate-graph-button-gating.md) — canGenerate must gate on isDraftReady alone, not the LLM's nextAction hint (revision-mode never enabled).
+- [Paper advance concurrency](project_paper-advance-concurrency.md) — advanceSession optimistic-lock + cursor pre-filter contract; regression risks when refactoring the poll path.

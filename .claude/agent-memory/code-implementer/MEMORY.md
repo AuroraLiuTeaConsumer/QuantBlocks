@@ -1,0 +1,2 @@
+- [Project Architecture](project-architecture.md) — QuantBlocks stack, key module locations, TimescaleDB vs Prisma split, and migration workflow
+- [Codebase Patterns](codebase-patterns.md) — job file structure, Prisma cast pattern for unapplied migrations, queryCandles usage via repo instance

@@ -25,25 +25,7 @@
  */
 
 // Load .env before any imports that read process.env
-import path from "path";
-import fs from "fs";
-
-const cwd = process.cwd();
-for (const f of [".env.local", ".env"]) {
-  const p = path.join(cwd, f);
-  if (fs.existsSync(p)) {
-    const lines = fs.readFileSync(p, "utf-8").split("\n");
-    for (const line of lines) {
-      const m = line.match(/^([^#=\s][^=]*)=(.*)$/);
-      if (m) {
-        const key = m[1].trim();
-        const val = m[2].trim().replace(/^"|"$/g, "");
-        if (!process.env[key]) process.env[key] = val;
-      }
-    }
-    break;
-  }
-}
+import "./load-env";
 
 import { getTimescaleRepo } from "../../lib/market-data/storage/timescale.repo";
 import type { Candle, Timeframe } from "../../lib/market-data/types";
@@ -155,7 +137,6 @@ function connect(symbols: string[], timeframe: string) {
     const ccxtSymbol = binanceSymbolToCcxt(k.s.toLowerCase());
     const openTime = new Date(k.t);
     const closeTime = new Date(k.T);
-    const tfMs = closeTime.getTime() - openTime.getTime();
 
     const candle: Candle = {
       exchange: "binance",
@@ -172,8 +153,6 @@ function connect(symbols: string[], timeframe: string) {
       tradeCount: k.n,
       closed: true,
     };
-
-    void tfMs; // suppress unused warning
 
     try {
       const repo = getTimescaleRepo();

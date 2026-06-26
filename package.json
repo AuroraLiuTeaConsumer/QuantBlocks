@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "setup:timescale": "tsx scripts/setup-timescale.ts",
     "ingest": "tsx src/server/jobs/ingest-candles.job.ts",
-    "ws:ingest": "tsx src/server/jobs/ws-ingest.job.ts"
+    "ws:ingest": "tsx src/server/jobs/ws-ingest.job.ts",
+    "paper:worker": "tsx src/server/jobs/paper-worker.job.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

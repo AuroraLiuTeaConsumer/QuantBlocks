@@ -12,3 +12,4 @@
 - [Generate Graph button gating](project_generate-graph-button-gating.md) — canGenerate must gate on isDraftReady alone, not the LLM's nextAction hint (revision-mode never enabled).
 - [Paper advance concurrency](project_paper-advance-concurrency.md) — advanceSession optimistic-lock + cursor pre-filter contract; regression risks when refactoring the poll path.
 - [Paper snapshot type divergence](project_paper-snapshot-type-divergence.md) — engine SessionSnapshot (no lastBar) vs PaperTradingPanel local type; SSE path casts across them, drops candles.
+- [Replay pump live-edge](project_replay-pump-liveedge.md) — accelerated replay pump; replayUntil frozen at session start, catch-up nulls replay fields then hands off to live WS bars.

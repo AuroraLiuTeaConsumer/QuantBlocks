@@ -74,16 +74,24 @@ export async function GET(
       // DB temporarily unavailable — keep session running, retry next poll
       return NextResponse.json(toSnapshot(session as unknown as SessionRow));
     }
-    // Genuinely caught up to the most recent candle — auto-stop
-    await prisma.paperSession.updateMany({
-      where: { id: sessionId, status: "running" },
-      data: { status: "stopped" },
-    });
-    const stopped = await prisma.paperSession.findUnique({ where: { id: sessionId } });
-    if (!stopped) {
-      return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    // poll-mode sessions auto-stop when they catch up to the latest candle.
+    // worker-mode sessions idle indefinitely — the background paper-worker drives
+    // them; if the worker process dies, client polls still advance the session
+    // but must NOT auto-stop it (idempotency guarantee in advanceSession handles
+    // the concurrent-writer scenario safely).
+    if (session.mode === "poll") {
+      await prisma.paperSession.updateMany({
+        where: { id: sessionId, status: "running" },
+        data: { status: "stopped" },
+      });
+      const stopped = await prisma.paperSession.findUnique({ where: { id: sessionId } });
+      if (!stopped) {
+        return NextResponse.json({ error: "Session not found" }, { status: 404 });
+      }
+      return NextResponse.json(toSnapshot(stopped as unknown as SessionRow));
     }
-    return NextResponse.json(toSnapshot(stopped as unknown as SessionRow));
+    // Non-poll (worker) mode — caught up to live edge; return running snapshot unchanged.
+    return NextResponse.json(toSnapshot(session as unknown as SessionRow));
   }
 
   // ── Advance the session ───────────────────────────────────────────────────

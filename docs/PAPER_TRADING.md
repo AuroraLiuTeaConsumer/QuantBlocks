@@ -21,6 +21,8 @@ On every poll the route:
 
 The `barCursor` is resolved and persisted at session creation: `replayFrom` (if provided), otherwise 90 days before session creation. It is never left `null` — `paper/start` stores the resolved value up front so every snapshot reports the true replay anchor, not just explicit replays. This also lets the chart's bar-seeding request (`GET /api/strategies/:id/bars?end=<barCursor>`) anchor its window to end exactly where the replay begins, instead of "now" — see [Chart Seeding](#chart-seeding) below.
 
+When `replaySpeed` is supplied, the session enters worker-mode replay and the background paper worker advances the session at the requested rate until it catches up to the live edge. `replayUntil` is stored as a live-edge marker and cleared once real-time parity is reached.
+
 ## Session Lifecycle
 
 1. **Idle**: No session or status=idle; Reset clears trades and engineState
@@ -32,7 +34,7 @@ The `barCursor` is resolved and persisted at session creation: `replayFrom` (if 
 | Action | Endpoint | Behavior |
 |--------|----------|----------|
 | Resume | GET `/api/strategies/:id/paper/session` | Returns most recent `running` or `stopped` session (200), or 404 if none. Used on panel mount to restore state after refresh or tab switch. |
-| Start | POST `/api/strategies/:id/paper/start` | Create session or return existing running session. Seeds `lastPrice` from the most recent TimescaleDB candle (falls back to 100 if unavailable). Body: `{ replayFrom?: ISO string }`. **409** if a session is already running and caller sends a different `replayFrom`. |
+| Start | POST `/api/strategies/:id/paper/start` | Create session or return existing running session. Seeds `lastPrice` from the most recent TimescaleDB candle (falls back to 100 if unavailable). Body: `{ replayFrom?: ISO string, replaySpeed?: number }`. `replaySpeed` enables worker-mode accelerated replay and is capped at 600 bars/sec. **409** if a session is already running and caller sends a different `replayFrom`. |
 | Stop | POST `/api/paper/:sessionId/stop` | Force-close position, set status=stopped |
 | Reset | POST `/api/paper/:sessionId/reset` | Delete PaperTrades, set status=idle, clear engineState + barCursor. Re-seeds `lastPrice` from the most recent TimescaleDB candle (falls back to 100) so the next start begins at a realistic price. |
 
@@ -69,9 +71,9 @@ Concurrent polls (e.g. multiple browser tabs) use an optimistic lock on `PaperSe
 
 ## In-Memory Limitations
 
-- Execution is **not** continuous; it advances only when a client polls
-- No background worker; if no one polls, session does not advance
-- Replay is capped at 5 candles per poll to keep the UI responsive
+- Execution is **not** continuous by default; it advances only when a client polls.
+- Sessions started with `replaySpeed` may use the background worker to advance automatically until the live edge is reached.
+- Replay is capped at 5 candles per poll to keep the UI responsive for normal polling sessions.
 - If no data is ingested for the instrument, the session stalls (poll returns unchanged snapshot)
 
 ## Trade Persistence

@@ -53,6 +53,8 @@ async function fetchSession(sessionId: string): Promise<SessionRow | null> {
       barCursor: true,
       startedAt: true,
       updatedAt: true,
+      mode: true,
+      replaySpeed: true,
     },
   });
   return row as SessionRow | null;
@@ -127,7 +129,15 @@ export async function GET(
 
       // ── 3. On Redis nudge: re-read Prisma and emit snapshot ───────────────
       if (sub) {
+        // Drop-if-busy guard: two rapid nudges can resolve fetchSession out of
+        // order, causing stale snapshots to overwrite fresher ones. We serialise
+        // by skipping any nudge that arrives while one is already in-flight.
+        // Dropping is safe — nudges are informational triggers, not payloads;
+        // the next nudge or the next poll cycle will deliver any missed state.
+        let processing = false;
         sub.on("message", async (_channel: string, raw: string) => {
+          if (processing) return;
+          processing = true;
           try {
             // lastBar is ephemeral (not stored in Prisma); extract it from the
             // nudge payload published by the paper-worker.
@@ -148,6 +158,8 @@ export async function GET(
             if (row.status !== "running") cleanup();
           } catch {
             // Transient DB error — skip this nudge.
+          } finally {
+            processing = false;
           }
         });
       }

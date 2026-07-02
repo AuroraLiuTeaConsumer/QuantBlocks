@@ -2,7 +2,7 @@
 
 ## Overview
 
-QuantBlocks is a full-stack Next.js application. Frontend and API routes run in the same process. No background workers; paper trading advances via polling.
+QuantBlocks is a full-stack Next.js application. Frontend and API routes run in the same process. Paper trading advances by client polling by default; sessions started with `replaySpeed` may use a background paper worker for accelerated replay.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -159,7 +159,7 @@ Issues are logged as warnings but do **not** block ingestion. Aggregated `Qualit
 2. **Create**: `/strategies` → POST `/api/strategies` with `{ name }` (optional empty `nodes`/`edges`) → redirect to workspace.
 3. **Backtest**: BacktestPanel → POST `/api/strategies/:id/backtests` → `validateGraph` → `BacktestDataLoader.load()` → real candles (or SAMPLE_CANDLES fallback) → `runBacktest` → trades persisted.
 4. **Paper resume**: PaperTradingPanel mount → GET `/api/strategies/:id/paper/session` → if running, re-attach polling; if stopped, show snapshot + trades.
-5. **Paper**: POST `/api/strategies/:id/paper/start` with optional `{ replayFrom }` → PaperSession; GET `/api/paper/:sessionId` fetches up to 5 TimescaleDB candles after `barCursor` per poll.
+5. **Paper**: POST `/api/strategies/:id/paper/start` with optional `{ replayFrom, replaySpeed }` → PaperSession. Normal sessions advance by client poll; `replaySpeed` requests worker-mode replay and lets the background worker advance the session until it catches up to the live edge.
 
 ## Separation of Concerns
 
@@ -184,7 +184,7 @@ Issues are logged as warnings but do **not** block ingestion. Aggregated `Qualit
 
 ## Current Weak Points / Technical Debt
 
-1. **Poll-only paper advancement**: Paper trading advances only when a client polls. No background worker — if no tab is open, the session does not advance. Concurrent tabs use optimistic locking with up to 3 server-side retries per poll.
+1. **Poll-driven paper advancement by default**: Paper trading advances only when a client polls unless the session was started with `replaySpeed`, in which case a background paper worker advances it at the requested rate until the live edge is reached. Concurrent tabs still use optimistic locking with up to 3 server-side retries per poll.
 2. **No real-time feed**: Paper replays historical candles from TimescaleDB; it is not driven by a live stream. Phase 4 would add Redis pub/sub for true live advancement.
 3. **Ingestion required for paper**: No synthetic fallback; sessions stall if no candles exist for the strategy instrument.
 4. **AI quality**: LLM output is non-deterministic; the retry loop handles most validation failures but exotic prompts may still return a 422.

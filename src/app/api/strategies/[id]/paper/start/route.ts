@@ -9,6 +9,7 @@ import type { Timeframe } from "@/lib/market-data/types";
 import { getTimescaleRepo } from "@/lib/market-data/storage/timescale.repo";
 import { getBacktestDataLoader, InsufficientDataError } from "@/lib/backtest/data-loader";
 import { HistoricalDataIngestionService } from "@/lib/market-data/ingestion/historical-service";
+import { isWorkerAlive } from "@/lib/redis/client";
 
 const INITIAL_EQUITY = 10_000;
 const FALLBACK_PRICE = 100;
@@ -19,14 +20,17 @@ export async function POST(
 ) {
   const { id } = await params;
 
-  // Optional body: { replayFrom?: string (ISO date) }
+  // Optional body: { replayFrom?: string (ISO date), replaySpeed?: number (bars/sec, max 600) }
   let barCursor: Date | null = null;
+  let replaySpeed: number | null = null;
   try {
     const body = await req.json() as Record<string, unknown>;
     if (typeof body.replayFrom === "string" && body.replayFrom) {
       const d = new Date(body.replayFrom);
       if (!isNaN(d.getTime())) barCursor = d;
     }
+    if (typeof body.replaySpeed === "number" && body.replaySpeed > 0)
+      replaySpeed = Math.min(Math.floor(body.replaySpeed), 600);
   } catch {
     // empty / non-JSON body — use defaults
   }
@@ -124,6 +128,16 @@ export async function POST(
 
     const engineState = createInitialState(INITIAL_EQUITY);
 
+    // Choose "worker" mode only when the paper-worker process is confirmed alive
+    // via its Redis heartbeat key. A live Redis with no running worker would
+    // silently stall all worker-mode sessions. Fall back to "poll" otherwise.
+    const workerOk = await isWorkerAlive();
+
+    // Degraded case: caller requested accelerated replay but the worker is not
+    // running. The session is created in poll mode; no replay pump will run and
+    // the session will auto-stop at the live edge. Surface as a warning.
+    const replayDegraded = !workerOk && replaySpeed != null;
+
     const session = await prisma.paperSession.create({
       data: {
         strategyId: id,
@@ -140,11 +154,22 @@ export async function POST(
         useRealBars: true,
         barCursor,
         engineState: JSON.parse(JSON.stringify(engineState)) as Prisma.InputJsonValue,
+        mode: workerOk ? "worker" : "poll",
+        replaySpeed: replaySpeed ?? null,
+        replayUntil: replaySpeed ? new Date() : null,
         startedAt: new Date(),
       },
     });
 
-    return NextResponse.json(toSnapshot(session as unknown as SessionRow));
+    return NextResponse.json({
+      ...toSnapshot(session as unknown as SessionRow),
+      ...(replayDegraded
+        ? {
+            warning:
+              "Accelerated replay requires the paper-worker (Redis unavailable). Session will advance at poll pace and auto-stop at the live edge.",
+          }
+        : {}),
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Database error";
     console.error("[paper/start] Prisma error:", message);

@@ -194,9 +194,11 @@ GET `/api/strategies/:id/paper/session`
 ### Start
 
 POST `/api/strategies/:id/paper/start`  
-**Body** (all optional): `{ replayFrom?: ISO date string }`
+**Body** (all optional): `{ replayFrom?: ISO date string, replaySpeed?: number }`
 
 Creates PaperSession with `useRealBars=true` (always) and `barCursor` (= `replayFrom` date, or null). Also seeds `lastPrice` from the most recent TimescaleDB candle (falls back to 100 if unavailable).
+
+If `replaySpeed` is provided, the session is created in worker mode and the background paper worker will advance it at up to 600 bars/sec until it reaches the live edge. If omitted, the session advances only via client polling.
 
 Returns existing running session unchanged. **409** if a session is already running and the body includes a different `replayFrom` (stop first).
 

@@ -4,11 +4,12 @@
 import "./load-env";
 
 import { prisma } from "../../lib/prisma";
-import { getRedisPublisher, createRedisSubscriber } from "../../lib/redis/client";
+import { getRedisPublisher, createRedisSubscriber, setWorkerHeartbeat, clearWorkerHeartbeat } from "../../lib/redis/client";
 import { candleChannel, sessionChannel, decodeCandleMsg } from "../../lib/redis/channels";
 import { getActiveSessions, getWorkerSubscriptions } from "../../lib/paper/registry";
 import { advanceSession } from "../../lib/paper/advance";
 import type { LastBar } from "../../lib/paper/advance";
+import { runReplayPump } from "../../lib/paper/replay";
 import { getTimescaleRepo } from "../../lib/market-data/storage/timescale.repo";
 import { resolveInstrument, isTimeframe } from "../../lib/market-data/types";
 import type { Exchange, Timeframe } from "../../lib/market-data/types";
@@ -19,6 +20,22 @@ const subscriber = createRedisSubscriber();
 const publisher = getRedisPublisher();
 
 const subscribedChannels = new Set<string>();
+
+// Tracks in-flight replay pumps; keyed by sessionId.
+const activePumps = new Map<string, Promise<void>>();
+
+// Notification callback passed to the replay pump.
+const notifyFn = (id: string, type: string, lastBar?: LastBar | null): void => {
+  if (type === "advanced") {
+    publishAdvanced(id, new Date(), lastBar ?? null);
+  } else {
+    publisher
+      .publish(sessionChannel(id), JSON.stringify({ v: 1, type, updatedAt: new Date() }))
+      .catch((err: unknown) => {
+        console.warn("[paper-worker] notifyFn error:", err instanceof Error ? err.message : String(err));
+      });
+  }
+};
 
 // Tracks in-flight advanceSession calls so shutdown can drain them.
 let inFlight = 0;
@@ -116,7 +133,7 @@ async function catchUpSweep(): Promise<void> {
   let sessions: Awaited<ReturnType<typeof prisma.paperSession.findMany>>;
   try {
     sessions = await prisma.paperSession.findMany({
-      where: { status: "running" },
+      where: { status: "running", mode: "worker", replaySpeed: null },
     });
   } catch (err) {
     console.warn("[paper-worker] catchUpSweep query error:", err instanceof Error ? err.message : String(err));
@@ -126,10 +143,6 @@ async function catchUpSweep(): Promise<void> {
   const repo = getTimescaleRepo();
 
   for (const session of sessions) {
-    // TODO(post-migrate): push mode: "worker" into the findMany where clause above
-    // and remove this cast once prisma generate is re-run against the new schema.
-    if ((session as any).mode !== "worker") continue;
-
     try {
       const mapping = resolveInstrument(session.instrument);
       if (!mapping) continue;
@@ -165,7 +178,7 @@ async function catchUpSweep(): Promise<void> {
       try {
         const result = await advanceSession(session.id, bars);
         if (result.kind === "advanced") {
-          publishAdvanced(session.id, result.updatedAt);
+          publishAdvanced(session.id, result.updatedAt, result.lastBar);
         }
       } finally {
         trackEnd();
@@ -176,15 +189,41 @@ async function catchUpSweep(): Promise<void> {
   }
 }
 
+async function syncReplayPumps(): Promise<void> {
+  let sessions: Array<{ id: string }>;
+  try {
+    sessions = await prisma.paperSession.findMany({
+      where: { status: "running", mode: "worker", replaySpeed: { not: null } },
+      select: { id: true },
+    });
+  } catch (err) {
+    console.warn("[paper-worker] syncReplayPumps error:", err instanceof Error ? err.message : String(err));
+    return;
+  }
+
+  for (const { id } of sessions) {
+    if (!activePumps.has(id)) {
+      const pump = runReplayPump(id, notifyFn).finally(() => activePumps.delete(id));
+      activePumps.set(id, pump);
+    }
+  }
+}
+
 void syncSubscriptions();
-const syncInterval = setInterval(() => { void syncSubscriptions(); }, 10_000);
+void syncReplayPumps();
+const syncInterval = setInterval(() => { void syncSubscriptions(); void syncReplayPumps(); }, 10_000);
 
 void catchUpSweep();
 const sweepInterval = setInterval(() => { void catchUpSweep(); }, 30_000);
 
+void setWorkerHeartbeat();
+const heartbeatInterval = setInterval(() => { void setWorkerHeartbeat(); }, 10_000);
+
 async function shutdown(): Promise<void> {
   clearInterval(syncInterval);
   clearInterval(sweepInterval);
+  clearInterval(heartbeatInterval);
+  await clearWorkerHeartbeat();
   await drainInFlight();
   await subscriber.quit();
   await prisma.$disconnect();

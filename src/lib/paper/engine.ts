@@ -28,6 +28,8 @@ export type SessionSnapshot = {
   barCursor: string | null; // ISO timestamp of last replayed candle
   startedAt: string | null;
   updatedAt: string;
+  mode: string;
+  replaySpeed: number | null;
   lastBar?: { time: number; open: number; high: number; low: number; close: number };
 };
 
@@ -49,6 +51,8 @@ export type SessionRow = {
   barCursor: Date | null;
   startedAt: Date | null;
   updatedAt: Date;
+  mode: string;
+  replaySpeed: number | null;
 };
 
 // ── Snapshot helper ──────────────────────────────────────────
@@ -73,5 +77,7 @@ export function toSnapshot(row: SessionRow): SessionSnapshot {
     barCursor: row.barCursor?.toISOString() ?? null,
     startedAt: row.startedAt?.toISOString() ?? null,
     updatedAt: row.updatedAt.toISOString(),
+    mode: row.mode,
+    replaySpeed: row.replaySpeed,
   };
 }

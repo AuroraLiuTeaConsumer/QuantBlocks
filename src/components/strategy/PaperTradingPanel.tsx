@@ -33,6 +33,8 @@ type SessionSnapshot = {
   barCursor: string | null;
   startedAt: string | null;
   updatedAt: string;
+  mode?: string;
+  replaySpeed?: number | null;
   lastBar?: { time: number; open: number; high: number; low: number; close: number };
 };
 
@@ -121,6 +123,7 @@ export function PaperTradingPanel({
   const [loading, setLoading] = useState(false);
   const [restoring, setRestoring] = useState(true);
   const [replayFrom, setReplayFrom] = useState("");
+  const [replaySpeed, setReplaySpeed] = useState<string>(""); // "" = realtime
 
   const mountedRef = useRef(true);
   const sessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -340,6 +343,9 @@ export function PaperTradingPanel({
     try {
       const body: Record<string, unknown> = { useRealBars: true };
       if (replayFrom) body.replayFrom = replayFrom;
+      const speedNum = Number(replaySpeed);
+      if (replaySpeed && Number.isFinite(speedNum) && speedNum > 0)
+        body.replaySpeed = speedNum;
       const res = await fetch(`/api/strategies/${strategyId}/paper/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -473,9 +479,14 @@ export function PaperTradingPanel({
               style={{ background: "var(--accent)" }}
             />
           )}
+          {isRunning && session?.replaySpeed != null && (
+            <span className="rounded-full bg-accent-bg px-2 py-0.5 text-[10px] font-semibold text-accent">
+              Replaying…
+            </span>
+          )}
         </div>
 
-        {/* Replay date — only shown when not running */}
+        {/* Replay controls — only shown when not running */}
         {!isRunning && (
           <div className="flex items-center gap-1.5 text-xs text-ink-2">
             <span className="font-medium">Replay from</span>
@@ -485,6 +496,18 @@ export function PaperTradingPanel({
               onChange={(e) => setReplayFrom(e.target.value)}
               className="rounded border border-line bg-surface px-2 py-0.5 text-[11px] text-ink-1 focus:outline-none focus:ring-1 focus:ring-accent"
             />
+            <span className="font-medium">Speed</span>
+            <select
+              value={replaySpeed}
+              onChange={(e) => setReplaySpeed(e.target.value)}
+              className="rounded border border-line bg-surface px-2 py-0.5 text-[11px] text-ink-1 focus:outline-none focus:ring-1 focus:ring-accent"
+            >
+              <option value="">Realtime</option>
+              <option value="10">10x</option>
+              <option value="60">60x</option>
+              <option value="300">300x</option>
+              <option value="600">600x</option>
+            </select>
             <span className="text-ink-3">(optional)</span>
           </div>
         )}

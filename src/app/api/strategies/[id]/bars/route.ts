@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getTimescaleRepo } from "@/lib/market-data/storage/timescale.repo";
-import { resolveInstrument, isTimeframe } from "@/lib/market-data/types";
+import { resolveInstrument, isTimeframe, TIMEFRAME_MS } from "@/lib/market-data/types";
 import type { Timeframe } from "@/lib/market-data/types";
 
 const DEFAULT_TIMEFRAME = "1h";
@@ -107,7 +107,15 @@ export async function GET(
     try {
       const repo = getTimescaleRepo();
       const endTime = anchorEnd;
-      const startTime = new Date(endTime.getTime() - 90 * 24 * 3_600 * 1_000);
+      const timeframeMs = TIMEFRAME_MS[tf];
+
+      // queryCandles returns rows in ascending order before applying `limit`.
+      // Starting from a fixed 90-day boundary therefore returned the *oldest*
+      // `limit` rows in that window, leaving a large gap before an anchored
+      // paper replay. Restrict the range to the final `limit` candle slots so
+      // the seed ends immediately before the replay cursor.
+      const lastOpenTimeMs = Math.floor((endTime.getTime() - 1) / timeframeMs) * timeframeMs;
+      const startTime = new Date(lastOpenTimeMs - (limit - 1) * timeframeMs);
 
       const candles = await repo.queryCandles({
         exchange: mapping.exchange,

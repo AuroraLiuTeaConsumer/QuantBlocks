@@ -10,10 +10,17 @@ export type LastBar = {
   high: number;
   low: number;
   close: number;
+  equity: number;
 };
 
 export type AdvanceResult =
-  | { kind: "advanced"; updatedAt: Date; barsProcessed: number; lastBar: LastBar | null }
+  | {
+      kind: "advanced";
+      updatedAt: Date;
+      barsProcessed: number;
+      bars: LastBar[];
+      lastBar: LastBar | null;
+    }
   | { kind: "noop" }
   | { kind: "skipped"; reason: "not-running" | "lock-lost-all-retries" }
   | { kind: "skipped"; reason: "compile-error"; errors: import("@/lib/strategy/engine/types").CompileError[] };
@@ -114,6 +121,7 @@ export async function advanceSession(
 
     const tradesToCreate: TradeData[] = [];
     const prevPollCloses: Array<{ exitTime: Date; exitPrice: number; pnl: number }> = [];
+    const processedBars: LastBar[] = [];
     let lastPrice = session.lastPrice;
     let lastBar: LastBar | null = null;
     let newBarCursor: Date | null = session.barCursor ?? null;
@@ -127,11 +135,19 @@ export async function advanceSession(
         close: rb.close,
       };
       newBarCursor = rb.openTime;
-      lastBar = { time: bar.timeSec, open: rb.open, high: rb.high, low: rb.low, close: rb.close };
 
       const result = step(compiled.value, bar, engineState);
       engineState = result.state;
       lastPrice = bar.close;
+      lastBar = {
+        time: bar.timeSec,
+        open: rb.open,
+        high: rb.high,
+        low: rb.low,
+        close: rb.close,
+        equity: engineState.equity,
+      };
+      processedBars.push(lastBar);
 
       for (const evt of result.events) {
         if (evt.kind === "OPENED") {
@@ -200,7 +216,13 @@ export async function advanceSession(
 
     await persistTrades(sessionId, tradesToCreate, prevPollCloses);
 
-    return { kind: "advanced", updatedAt: now, barsProcessed: filteredBars.length, lastBar };
+    return {
+      kind: "advanced",
+      updatedAt: now,
+      barsProcessed: filteredBars.length,
+      bars: processedBars,
+      lastBar,
+    };
   }
 
   return { kind: "skipped", reason: "lock-lost-all-retries" };

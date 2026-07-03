@@ -17,7 +17,12 @@ function sleep(ms: number): Promise<void> {
  */
 export async function runReplayPump(
   sessionId: string,
-  onNotify: (sessionId: string, type: string, lastBar?: LastBar | null) => void,
+  onNotify: (
+    sessionId: string,
+    type: string,
+    lastBar?: LastBar | null,
+    bars?: LastBar[],
+  ) => void,
 ): Promise<void> {
   const repo = getTimescaleRepo();
 
@@ -99,7 +104,7 @@ export async function runReplayPump(
         }));
         const result = await advanceSession(sessionId, bars);
         if (result.kind === "advanced") {
-          onNotify(sessionId, "advanced", result.lastBar);
+          onNotify(sessionId, "advanced", result.lastBar, result.bars);
         } else if (result.kind === "skipped") {
           if (result.reason === "compile-error") {
             // Strategy is permanently broken — can't make progress; clear replay

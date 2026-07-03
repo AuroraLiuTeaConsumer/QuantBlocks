@@ -166,6 +166,106 @@ describe("step", () => {
   });
 });
 
+describe("registry indicator handles", () => {
+  it("resolves the generic out handle to a single-output indicator value", () => {
+    const graph: StrategyGraph = {
+      nodes: [
+        {
+          id: "ema1",
+          type: "indicator",
+          data: { indicatorId: "ema", params: { period: 2, field: "close" } },
+          position: { x: 0, y: 0 },
+        },
+        {
+          id: "cmp",
+          type: "compare",
+          data: { op: ">", rightType: "number", rightValue: 1 },
+          position: { x: 100, y: 0 },
+        },
+        {
+          id: "open",
+          type: "open_position",
+          data: { side: "long", qtyType: "fixed", qty: 1 },
+          position: { x: 200, y: 0 },
+        },
+        {
+          id: "risk",
+          type: "set_risk",
+          data: { slPct: 5 },
+          position: { x: 200, y: 100 },
+        },
+      ],
+      edges: [
+        { id: "e1", source: "ema1", sourceHandle: "out", target: "cmp", targetHandle: "left" },
+        { id: "e2", source: "cmp", target: "open" },
+        { id: "e3", source: "cmp", target: "risk" },
+      ],
+    };
+
+    const compiled = compileGraph(graph);
+    expect(compiled.ok).toBe(true);
+    if (!compiled.ok) return;
+
+    let state = createInitialState();
+    state = step(compiled.value, makeBar(1, 1), state).state;
+    const result = step(compiled.value, makeBar(2, 3), state);
+
+    expect(result.events.some((event) => event.kind === "OPENED")).toBe(true);
+  });
+
+  it("supports legacy fast and slow EMA output handles", () => {
+    const graph: StrategyGraph = {
+      nodes: [
+        {
+          id: "ema1",
+          type: "indicator",
+          data: { indicatorId: "ema", params: { fast: 2, slow: 3 } },
+          position: { x: 0, y: 0 },
+        },
+        {
+          id: "cross",
+          type: "cross",
+          data: { direction: "crossUp" },
+          position: { x: 100, y: 0 },
+        },
+        {
+          id: "open",
+          type: "open_position",
+          data: { side: "long", qtyType: "fixed", qty: 1 },
+          position: { x: 200, y: 0 },
+        },
+        {
+          id: "risk",
+          type: "set_risk",
+          data: { slPct: 5 },
+          position: { x: 200, y: 100 },
+        },
+      ],
+      edges: [
+        { id: "e1", source: "ema1", sourceHandle: "fast", target: "cross", targetHandle: "a" },
+        { id: "e2", source: "ema1", sourceHandle: "slow", target: "cross", targetHandle: "b" },
+        { id: "e3", source: "cross", target: "open" },
+        { id: "e4", source: "cross", target: "risk" },
+      ],
+    };
+
+    const compiled = compileGraph(graph);
+    expect(compiled.ok).toBe(true);
+    if (!compiled.ok) return;
+
+    let state = createInitialState();
+    const closes = [3, 2, 1, 2, 4];
+    const events = [];
+    for (let i = 0; i < closes.length; i++) {
+      const result = step(compiled.value, makeBar(i + 1, closes[i]), state);
+      state = result.state;
+      events.push(...result.events);
+    }
+
+    expect(events.some((event) => event.kind === "OPENED")).toBe(true);
+  });
+});
+
 // ── Determinism Test ─────────────────────────────────────────
 
 describe("determinism", () => {

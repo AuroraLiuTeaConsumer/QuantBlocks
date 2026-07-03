@@ -220,10 +220,20 @@ export function BacktestPanel({
     if (Array.isArray(data) && mountedRef.current) setTrades(data as Trade[]);
   }, []);
 
-  const fetchBars = useCallback(async (sid: string, timeframe: string) => {
-    const res = await fetch(
-      `/api/strategies/${sid}/bars?timeframe=${encodeURIComponent(timeframe)}&limit=500`
-    );
+  const fetchBars = useCallback(async (
+    sid: string,
+    timeframe: string,
+    startTime?: string | null,
+    endTime?: string | null,
+  ) => {
+    const params = new URLSearchParams({ timeframe, limit: "2000" });
+    if (startTime) params.set("start", startTime);
+    if (endTime) {
+      // BacktestRun.endTime is the final candle's open time; the bars endpoint
+      // uses an exclusive end boundary, so advance it by 1 ms to include it.
+      params.set("end", new Date(new Date(endTime).getTime() + 1).toISOString());
+    }
+    const res = await fetch(`/api/strategies/${sid}/bars?${params.toString()}`);
     if (!mountedRef.current) return;
     const stillCurrent =
       runStrategyIdRef.current === sid &&
@@ -261,7 +271,7 @@ export function BacktestPanel({
 
       const sid = runStrategyIdRef.current ?? strategyIdRef.current;
       const tf = runStrategyTimeframeRef.current ?? strategyTimeframeRef.current;
-      fetchBars(sid, tf);
+      fetchBars(sid, tf, run.startTime, run.endTime);
 
       const initialCapital = getInitialCapital(run);
       fetchTrades(rid).then(() => {

@@ -1,4 +1,4 @@
-import type { IndicatorDefinition } from "../types";
+import type { IndicatorCalculationResult, IndicatorDefinition } from "../types";
 import { createEmaAccState, stepEmaAcc, resolveInputSeries } from "../utils/math";
 import type { EmaAccState } from "../utils/math";
 
@@ -19,12 +19,48 @@ export const EmaDefinition: IndicatorDefinition = {
     },
   ],
   outputs: [{ name: "value", label: "EMA", type: "number" }],
-  warmupBars: (p) => Number(p.period),
-  createState: () => createEmaAccState(),
-  step({ bar, params, state }) {
-    const period = Number(params.period);
+  warmupBars: (p) =>
+    hasLegacyDualPeriods(p)
+      ? Math.max(Number(p.fast), Number(p.slow))
+      : Number(p.period),
+  createState: (p) =>
+    hasLegacyDualPeriods(p)
+      ? { fast: createEmaAccState(), slow: createEmaAccState() }
+      : createEmaAccState(),
+  step({ bar, params, state }): IndicatorCalculationResult {
     const src = resolveInputSeries(bar, String(params.field ?? "close"));
+
+    // Compatibility for graphs created by the earlier EMA-crossover builder,
+    // which represented fast and slow EMAs as two handles on one EMA node.
+    if (hasLegacyDualPeriods(params)) {
+      const legacyState = state as {
+        fast?: EmaAccState;
+        slow?: EmaAccState;
+      };
+      const fast = stepEmaAcc(
+        legacyState.fast ?? createEmaAccState(),
+        src,
+        Number(params.fast),
+      );
+      const slow = stepEmaAcc(
+        legacyState.slow ?? createEmaAccState(),
+        src,
+        Number(params.slow),
+      );
+      return {
+        outputs: { value: fast.value, fast: fast.value, slow: slow.value },
+        nextState: { fast: fast.next, slow: slow.next },
+      };
+    }
+
+    const period = Number(params.period);
     const { value, next } = stepEmaAcc(state as unknown as EmaAccState, src, period);
     return { outputs: { value }, nextState: next };
   },
 };
+
+function hasLegacyDualPeriods(params: Record<string, number | string>): boolean {
+  const fast = Number(params.fast);
+  const slow = Number(params.slow);
+  return Number.isFinite(fast) && fast > 0 && Number.isFinite(slow) && slow > 0;
+}

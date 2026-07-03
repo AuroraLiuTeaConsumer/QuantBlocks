@@ -35,7 +35,22 @@ type SessionSnapshot = {
   updatedAt: string;
   mode?: string;
   replaySpeed?: number | null;
-  lastBar?: { time: number; open: number; high: number; low: number; close: number };
+  lastBar?: {
+    time: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    equity?: number;
+  };
+  bars?: Array<{
+    time: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    equity?: number;
+  }>;
 };
 
 type PaperTrade = {
@@ -147,12 +162,18 @@ export function PaperTradingPanel({
   const appendFromSnapshot = useCallback((snap: SessionSnapshot) => {
     const chart = chartRef.current;
     if (!chart) return;
-    if (snap.lastBar) {
-      const time = snap.lastBar.time;
-      if (time > lastEquityTimeRef.current) {
-        chart.appendEquity({ time, value: snap.equity });
-        chart.appendBar(snap.lastBar);
-        lastEquityTimeRef.current = time;
+    const bars = snap.bars?.length ? snap.bars : snap.lastBar ? [snap.lastBar] : [];
+    if (bars.length > 0) {
+      let latestTime = lastEquityTimeRef.current;
+      for (const bar of bars) {
+        if (bar.time > latestTime) {
+          chart.appendBar(bar);
+          chart.appendEquity({ time: bar.time, value: bar.equity ?? snap.equity });
+          latestTime = bar.time;
+        }
+      }
+      if (latestTime > lastEquityTimeRef.current) {
+        lastEquityTimeRef.current = latestTime;
       }
     } else {
       // No bar yet (e.g. start snapshot before first poll bar) — append equity
@@ -326,14 +347,16 @@ export function PaperTradingPanel({
         if (cancelled) return;
         setSession(snap);
         pollTrades(snap.id);
-        fetchAndSeedBars(snap.strategyId, snap.timeframe, snap.barCursor);
+        await fetchAndSeedBars(snap.strategyId, snap.timeframe, snap.barCursor);
+        if (cancelled) return;
+        appendFromSnapshot(snap);
         if (snap.status === "running") startPolling(snap.id);
         setRestoring(false);
       })
       .catch(() => { if (!cancelled) setRestoring(false); });
 
     return () => { cancelled = true; };
-  }, [strategyId, startPolling, pollTrades, fetchAndSeedBars]);
+  }, [strategyId, startPolling, pollTrades, fetchAndSeedBars, appendFromSnapshot]);
 
   const handleStart = async () => {
     setError(null);
@@ -370,6 +393,8 @@ export function PaperTradingPanel({
               const snap = (await snapRes.json()) as SessionSnapshot;
               if (mountedRef.current) {
                 setSession(snap);
+                await fetchAndSeedBars(snap.strategyId, snap.timeframe, snap.barCursor);
+                if (!mountedRef.current) return;
                 appendFromSnapshot(snap);
                 if (snap.status === "running") startPolling(snap.id);
               }
@@ -387,8 +412,9 @@ export function PaperTradingPanel({
       setSession(snap);
       setTrades([]);
       setLoading(false);
+      await fetchAndSeedBars(strategyId, snap.timeframe, snap.barCursor);
+      if (!mountedRef.current) return;
       appendFromSnapshot(snap);
-      fetchAndSeedBars(strategyId, snap.timeframe, snap.barCursor);
       if (snap.status === "running") startPolling(snap.id);
     } catch (err) {
       if (mountedRef.current) {

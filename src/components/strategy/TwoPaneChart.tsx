@@ -18,7 +18,7 @@ import {
   type ISeriesMarkersPluginApi,
   type SeriesMarker,
   type Time,
-  type LogicalRange,
+  type IRange,
 } from "lightweight-charts";
 
 // ── Public types ─────────────────────────────────────────────
@@ -264,25 +264,52 @@ export const TwoPaneChart = forwardRef(function TwoPaneChart(
     bottomChart.timeScale().fitContent();
 
     // ── TimeScale sync (bi-directional) ──────────────────
-    // We sync logical range (bar-index based) which is more robust than
-    // visible time range when the two series have different time coverage.
+    // Synchronize by timestamp, not logical point index. The price pane can
+    // contain every candle while the equity pane is sampled once per processed
+    // batch, so equal logical indexes do not necessarily represent equal dates.
 
-    const onTopRangeChange = (range: LogicalRange | null) => {
-      if (isSyncingRef.current || !range) return;
+    const onTopRangeChange = (range: IRange<Time> | null) => {
+      if (
+        isSyncingRef.current ||
+        !range ||
+        range.from == null ||
+        range.to == null ||
+        bottomChart.timeScale().getVisibleRange() == null
+      ) {
+        return;
+      }
       isSyncingRef.current = true;
-      bottomChart.timeScale().setVisibleLogicalRange(range);
-      isSyncingRef.current = false;
+      try {
+        bottomChart.timeScale().setVisibleRange(range);
+      } catch {
+        // The target scale may be between setData([]) and its next update.
+      } finally {
+        isSyncingRef.current = false;
+      }
     };
 
-    const onBottomRangeChange = (range: LogicalRange | null) => {
-      if (isSyncingRef.current || !range) return;
+    const onBottomRangeChange = (range: IRange<Time> | null) => {
+      if (
+        isSyncingRef.current ||
+        !range ||
+        range.from == null ||
+        range.to == null ||
+        topChart.timeScale().getVisibleRange() == null
+      ) {
+        return;
+      }
       isSyncingRef.current = true;
-      topChart.timeScale().setVisibleLogicalRange(range);
-      isSyncingRef.current = false;
+      try {
+        topChart.timeScale().setVisibleRange(range);
+      } catch {
+        // The target scale may be between setData([]) and its next update.
+      } finally {
+        isSyncingRef.current = false;
+      }
     };
 
-    topChart.timeScale().subscribeVisibleLogicalRangeChange(onTopRangeChange);
-    bottomChart.timeScale().subscribeVisibleLogicalRangeChange(onBottomRangeChange);
+    topChart.timeScale().subscribeVisibleTimeRangeChange(onTopRangeChange);
+    bottomChart.timeScale().subscribeVisibleTimeRangeChange(onBottomRangeChange);
 
     // ── Crosshair sync ───────────────────────────────────
     // lightweight-charts v5 exposes setCrosshairPosition(price, time, series).
@@ -329,8 +356,8 @@ export const TwoPaneChart = forwardRef(function TwoPaneChart(
     // ── Cleanup ──────────────────────────────────────────
     return () => {
       ro.disconnect();
-      topChart.timeScale().unsubscribeVisibleLogicalRangeChange(onTopRangeChange);
-      bottomChart.timeScale().unsubscribeVisibleLogicalRangeChange(onBottomRangeChange);
+      topChart.timeScale().unsubscribeVisibleTimeRangeChange(onTopRangeChange);
+      bottomChart.timeScale().unsubscribeVisibleTimeRangeChange(onBottomRangeChange);
       if (markersPluginRef.current) {
         markersPluginRef.current.detach();
         markersPluginRef.current = null;
@@ -391,7 +418,15 @@ export const TwoPaneChart = forwardRef(function TwoPaneChart(
           close: b.close,
         })),
       );
+
+      // Give the equity pane the same historical time domain without inventing
+      // equity values before the paper session starts. These whitespace points
+      // let timestamp-based zooming and scrolling align both panes exactly.
+      equitySeriesRef.current?.setData(
+        sorted.map((b) => ({ time: b.time as Time })),
+      );
       topChartRef.current?.timeScale().fitContent();
+      bottomChartRef.current?.timeScale().fitContent();
     },
 
     setMarkers(markers: ChartMarker[]) {

@@ -89,7 +89,12 @@ export function computeMetrics(
   const wins = closedTrades.filter((t) => t.pnl > 0);
   const losses = closedTrades.filter((t) => t.pnl < 0);
 
-  const netPnl = closedTrades.reduce((s, t) => s + t.pnl, 0);
+  // The equity curve is the accounting source of truth: unlike the individual
+  // trade records, it includes entry fees, exit fees, funding, and any open
+  // position mark-to-market at the final bar.
+  const closedTradePnl = closedTrades.reduce((s, t) => s + t.pnl, 0);
+  const finalEquity = equityCurve.at(-1)?.equity ?? initialCapital + closedTradePnl;
+  const netPnl = finalEquity - initialCapital;
   const totalReturnPct = (netPnl / initialCapital) * 100;
   const winRate = closedTrades.length > 0 ? wins.length / closedTrades.length : 0;
   const avgWin = wins.length > 0 ? wins.reduce((s, t) => s + t.pnl, 0) / wins.length : 0;
@@ -116,9 +121,15 @@ export function computeMetrics(
 
   // ── Per-bar returns ──────────────────────────────────────────────────────
   const barReturns: number[] = [];
-  for (let i = 1; i < equityCurve.length; i++) {
-    const prev = equityCurve[i - 1].equity;
-    if (prev > 0) barReturns.push((equityCurve[i].equity - prev) / prev);
+  let previousEquity = initialCapital;
+  for (const point of equityCurve) {
+    // Normalize P&L changes by stable starting capital. Dividing by previous
+    // equity becomes undefined at insolvency and creates enormous sign-flipping
+    // returns near zero; it also caused the old implementation to omit bars
+    // whenever equity was non-positive. Capital-normalized strategy returns are
+    // defined across the full run and telescope to the reported total return.
+    barReturns.push((point.equity - previousEquity) / initialCapital);
+    previousEquity = point.equity;
   }
   const meanReturn =
     barReturns.length > 0 ? barReturns.reduce((s, r) => s + r, 0) / barReturns.length : 0;
@@ -129,10 +140,11 @@ export function computeMetrics(
     returnStd > 0 ? round4((meanReturn / returnStd) * Math.sqrt(annFactor)) : 0;
 
   // ── Sortino ─────────────────────────────────────────────────────────────
-  const downsideReturns = barReturns.filter((r) => r < 0);
+  // Downside semideviation around a 0% target, measured across all periods.
+  // This remains defined when a run has only one losing period.
   const downsideVariance =
-    downsideReturns.length > 1
-      ? downsideReturns.reduce((s, r) => s + r * r, 0) / (downsideReturns.length - 1)
+    barReturns.length > 0
+      ? barReturns.reduce((sum, r) => sum + Math.min(r, 0) ** 2, 0) / barReturns.length
       : 0;
   const downsideDev = Math.sqrt(downsideVariance);
   const sortino =

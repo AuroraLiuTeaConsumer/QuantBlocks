@@ -54,6 +54,44 @@ function generateSyntheticBars(barSpacingSec: number, limit: number): BarItem[] 
   return bars;
 }
 
+/** Preserve the requested date range while bounding chart payload size. */
+function aggregateBars(bars: BarItem[], limit: number): BarItem[] {
+  if (bars.length <= limit) return bars;
+
+  const bucketSize = Math.ceil(bars.length / limit);
+  const aggregated: BarItem[] = [];
+
+  for (let start = 0; start < bars.length; start += bucketSize) {
+    const end = Math.min(start + bucketSize, bars.length);
+    const first = bars[start];
+    const last = bars[end - 1];
+    let high = first.high;
+    let low = first.low;
+    let volume = 0;
+
+    for (let i = start; i < end; i++) {
+      high = Math.max(high, bars[i].high);
+      low = Math.min(low, bars[i].low);
+      volume += bars[i].volume ?? 0;
+    }
+
+    aggregated.push({
+      time: first.time,
+      open: first.open,
+      high,
+      low,
+      close: last.close,
+      volume,
+    });
+  }
+
+  // Keep the displayed extent equal to the actual run extent. The final bucket
+  // represents the tail of the run, so plotting it at the final candle time is
+  // more useful than ending the axis at the bucket's first candle.
+  aggregated[aggregated.length - 1].time = bars[bars.length - 1].time;
+  return aggregated;
+}
+
 // ─── Route ───────────────────────────────────────────────────────────────────
 
 /**
@@ -96,7 +134,11 @@ export async function GET(
   // seeded bars never sit later in time than the first bar the replay appends.
   const endParam = searchParams.get("end");
   const endParamDate = endParam ? new Date(endParam) : null;
-  const anchorEnd = endParamDate && !Number.isNaN(endParamDate.getTime()) ? endParamDate : new Date();
+  const hasExplicitAnchor = endParamDate != null && !Number.isNaN(endParamDate.getTime());
+  const anchorEnd = hasExplicitAnchor ? endParamDate : new Date();
+  const startParam = searchParams.get("start");
+  const startParamDate = startParam ? new Date(startParam) : null;
+  const hasExplicitStart = startParamDate != null && !Number.isNaN(startParamDate.getTime());
 
   // ── Attempt real data from TimescaleDB ───────────────────────────────────
 
@@ -115,7 +157,9 @@ export async function GET(
       // paper replay. Restrict the range to the final `limit` candle slots so
       // the seed ends immediately before the replay cursor.
       const lastOpenTimeMs = Math.floor((endTime.getTime() - 1) / timeframeMs) * timeframeMs;
-      const startTime = new Date(lastOpenTimeMs - (limit - 1) * timeframeMs);
+      const startTime = hasExplicitStart
+        ? startParamDate
+        : new Date(lastOpenTimeMs - (limit - 1) * timeframeMs);
 
       const candles = await repo.queryCandles({
         exchange: mapping.exchange,
@@ -123,18 +167,20 @@ export async function GET(
         timeframe: tf,
         startTime,
         endTime,
-        limit,
+        // A ranged backtest query must cover the entire run before chart
+        // aggregation. Other callers retain the efficient database limit.
+        ...(hasExplicitStart ? {} : { limit }),
       });
 
       if (candles.length > 0) {
-        const bars: BarItem[] = candles.map((c) => ({
+        const bars = aggregateBars(candles.map((c) => ({
           time: Math.floor(c.openTime.getTime() / 1_000),
           open: c.open,
           high: c.high,
           low: c.low,
           close: c.close,
           volume: c.volume,
-        }));
+        })), limit);
 
         return NextResponse.json(bars, {
           headers: {
@@ -147,6 +193,17 @@ export async function GET(
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[bars] Real data unavailable, using synthetic: ${msg}`);
     }
+  }
+
+  // An explicit `end` is used to seed a real-data paper replay. If no real
+  // candles exist before that cursor (common at the beginning of an exchange's
+  // history), synthetic bars generated near Date.now() would put 2026 timestamps
+  // beside 2020 replay prices and prevent older real bars from appending. Leave
+  // the chart empty instead; the first replay batch will establish its timeline.
+  if (hasExplicitAnchor) {
+    return NextResponse.json([], {
+      headers: { "X-Data-Source": "real-empty" },
+    });
   }
 
   // ── Synthetic fallback ───────────────────────────────────────────────────

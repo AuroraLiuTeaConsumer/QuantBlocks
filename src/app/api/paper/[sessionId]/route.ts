@@ -119,5 +119,9 @@ export async function GET(
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
   const snap = toSnapshot(updated as unknown as SessionRow);
-  return NextResponse.json(result.lastBar ? { ...snap, lastBar: result.lastBar } : snap);
+  return NextResponse.json(
+    result.lastBar
+      ? { ...snap, lastBar: result.lastBar, bars: result.bars }
+      : snap,
+  );
 }

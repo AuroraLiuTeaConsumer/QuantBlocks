@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { runBacktest, DEFAULT_CONFIG } from "../lib/backtest/backtest";
+import { computeMetrics } from "../lib/backtest/metrics";
 import type { StrategyGraph } from "../lib/strategy/graphTypes";
 import { SAMPLE_CANDLES, EXAMPLE_STRATEGY_NODES, EXAMPLE_STRATEGY_EDGES } from "../lib/data/candles";
 
@@ -113,5 +114,32 @@ describe("backtest engine", () => {
     // Net PnL should account for fees (slightly lower than without fees)
     const noFeeResult = runBacktest(exampleGraph, SAMPLE_CANDLES, { ...config, feeBps: 0 });
     expect(result.metrics.netPnl).toBeLessThanOrEqual(noFeeResult.metrics.netPnl);
+  });
+});
+
+describe("backtest metrics", () => {
+  it("keeps Sharpe direction consistent when equity crosses near zero", () => {
+    const candles = [
+      { time: "2026-01-01T00:00:00.000Z", open: 1, high: 1, low: 1, close: 1, volume: 1 },
+      { time: "2026-01-01T01:00:00.000Z", open: 1, high: 1, low: 1, close: 1, volume: 1 },
+      { time: "2026-01-01T02:00:00.000Z", open: 1, high: 1, low: 1, close: 1, volume: 1 },
+    ];
+    const metrics = computeMetrics(
+      [],
+      100,
+      [
+        { time: candles[0].time, equity: 100 },
+        { time: candles[1].time, equity: 1 },
+        { time: candles[2].time, equity: 2 },
+      ],
+      candles,
+      0,
+      3_600_000,
+    );
+
+    expect(metrics.netPnl).toBe(-98);
+    expect(metrics.totalReturnPct).toBe(-98);
+    expect(metrics.sharpe).toBeLessThan(0);
+    expect(metrics.sortino).toBeLessThan(0);
   });
 });

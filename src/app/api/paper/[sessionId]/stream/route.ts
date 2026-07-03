@@ -26,6 +26,7 @@ import { createRedisSubscriber } from "@/lib/redis/client";
 import { sessionChannel } from "@/lib/redis/channels";
 
 type LastBar = SessionSnapshot["lastBar"];
+type Bars = SessionSnapshot["bars"];
 
 /** Encode a value as an SSE data frame. */
 function sseFrame(obj: unknown): string {
@@ -129,38 +130,37 @@ export async function GET(
 
       // ── 3. On Redis nudge: re-read Prisma and emit snapshot ───────────────
       if (sub) {
-        // Drop-if-busy guard: two rapid nudges can resolve fetchSession out of
-        // order, causing stale snapshots to overwrite fresher ones. We serialise
-        // by skipping any nudge that arrives while one is already in-flight.
-        // Dropping is safe — nudges are informational triggers, not payloads;
-        // the next nudge or the next poll cycle will deliver any missed state.
-        let processing = false;
-        sub.on("message", async (_channel: string, raw: string) => {
-          if (processing) return;
-          processing = true;
-          try {
-            // lastBar is ephemeral (not stored in Prisma); extract it from the
-            // nudge payload published by the paper-worker.
-            let lastBar: LastBar;
+        // Process nudges in publication order. Advanced nudges carry ephemeral
+        // candle batches that are not stored in Prisma, so dropping or handling
+        // them out of order would leave permanent holes in the chart.
+        let messageQueue = Promise.resolve();
+        sub.on("message", (_channel: string, raw: string) => {
+          messageQueue = messageQueue.then(async () => {
             try {
-              const nudge = JSON.parse(raw) as { lastBar?: LastBar };
-              lastBar = nudge.lastBar;
-            } catch {
-              lastBar = undefined;
-            }
+              // Candle data is ephemeral (not stored in Prisma); extract it from
+              // the nudge payload published by the paper-worker.
+              let lastBar: LastBar;
+              let bars: Bars;
+              try {
+                const nudge = JSON.parse(raw) as { lastBar?: LastBar; bars?: Bars };
+                lastBar = nudge.lastBar;
+                bars = nudge.bars;
+              } catch {
+                lastBar = undefined;
+                bars = undefined;
+              }
 
-            const row = await fetchSession(sessionId);
-            if (!row) return;
-            const snap = toSnapshot(row);
-            send(lastBar ? { ...snap, lastBar } : snap);
-            // Close stream once the session reaches a terminal status so the
-            // Redis subscriber and heartbeat interval are not held indefinitely.
-            if (row.status !== "running") cleanup();
-          } catch {
-            // Transient DB error — skip this nudge.
-          } finally {
-            processing = false;
-          }
+              const row = await fetchSession(sessionId);
+              if (!row) return;
+              const snap = toSnapshot(row);
+              send(lastBar ? { ...snap, lastBar, ...(bars ? { bars } : {}) } : snap);
+              // Close stream once the session reaches a terminal status so the
+              // Redis subscriber and heartbeat interval are not held indefinitely.
+              if (row.status !== "running") cleanup();
+            } catch {
+              // Transient DB error — skip this nudge.
+            }
+          });
         });
       }
 

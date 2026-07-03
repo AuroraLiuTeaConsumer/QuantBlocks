@@ -30,7 +30,22 @@ export type SessionSnapshot = {
   updatedAt: string;
   mode: string;
   replaySpeed: number | null;
-  lastBar?: { time: number; open: number; high: number; low: number; close: number };
+  lastBar?: {
+    time: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    equity?: number;
+  };
+  bars?: Array<{
+    time: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    equity?: number;
+  }>;
 };
 
 /** Minimal DB row shape (matches Prisma PaperSession). */

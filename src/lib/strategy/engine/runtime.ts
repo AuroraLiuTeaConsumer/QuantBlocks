@@ -429,8 +429,7 @@ function getNumericInput(
 ): number | null {
   const edge = inputs.find((e) => e.targetHandle === handle) ?? inputs[positionalIdx];
   if (!edge) return null;
-  // If the edge carries a sourceHandle (multi-output indicator), look up the named output slot.
-  const key = edge.sourceHandle ? `${edge.sourceId}:${edge.sourceHandle}` : edge.sourceId;
+  const key = sourceValueKey(edge);
   const v = state.nodeValues[key];
   return typeof v === "number" ? v : null;
 }
@@ -442,8 +441,17 @@ function resolveSourceId(
 ): string | undefined {
   const edge = inputs.find((e) => e.targetHandle === handle) ?? inputs[positionalIdx];
   if (!edge) return undefined;
-  // Use the composite key so cross-bar prevSeries tracking works for named outputs.
-  return edge.sourceHandle ? `${edge.sourceId}:${edge.sourceHandle}` : edge.sourceId;
+  return sourceValueKey(edge);
+}
+
+/**
+ * Single-output indicator nodes expose a generic React Flow handle named
+ * `out`, while their registry output is stored as the node's scalar value.
+ * Multi-output handles retain their named `${nodeId}:${handle}` slots.
+ */
+function sourceValueKey(edge: CompiledInput): string {
+  if (!edge.sourceHandle || edge.sourceHandle === "out") return edge.sourceId;
+  return `${edge.sourceId}:${edge.sourceHandle}`;
 }
 
 function getAllBooleans(inputs: CompiledInput[], state: EngineState): boolean[] {

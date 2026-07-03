@@ -25,9 +25,14 @@ const subscribedChannels = new Set<string>();
 const activePumps = new Map<string, Promise<void>>();
 
 // Notification callback passed to the replay pump.
-const notifyFn = (id: string, type: string, lastBar?: LastBar | null): void => {
+const notifyFn = (
+  id: string,
+  type: string,
+  lastBar?: LastBar | null,
+  bars?: LastBar[],
+): void => {
   if (type === "advanced") {
-    publishAdvanced(id, new Date(), lastBar ?? null);
+    publishAdvanced(id, new Date(), lastBar ?? null, bars ?? []);
   } else {
     publisher
       .publish(sessionChannel(id), JSON.stringify({ v: 1, type, updatedAt: new Date() }))
@@ -54,11 +59,16 @@ function drainInFlight(): Promise<void> {
   return new Promise((resolve) => { drainResolve = resolve; });
 }
 
-function publishAdvanced(sessionId: string, updatedAt: Date, lastBar: LastBar | null): void {
+function publishAdvanced(
+  sessionId: string,
+  updatedAt: Date,
+  lastBar: LastBar | null,
+  bars: LastBar[],
+): void {
   publisher
     .publish(
       sessionChannel(sessionId),
-      JSON.stringify({ v: 1, type: "advanced", updatedAt, lastBar }),
+      JSON.stringify({ v: 1, type: "advanced", updatedAt, lastBar, bars }),
     )
     .catch((err: unknown) => {
       console.warn("[paper-worker] publish error:", err instanceof Error ? err.message : String(err));
@@ -116,7 +126,7 @@ subscriber.on("message", async (_channel: string, raw: string) => {
         // in advanceSession ensures only one writer wins per bar.
         const result = await advanceSession(sessionId, [bar]);
         if (result.kind === "advanced") {
-          publishAdvanced(sessionId, result.updatedAt, result.lastBar);
+          publishAdvanced(sessionId, result.updatedAt, result.lastBar, result.bars);
         }
       } catch (err) {
         console.warn("[paper-worker] advanceSession error for", sessionId, ":", err instanceof Error ? err.message : String(err));
@@ -178,7 +188,7 @@ async function catchUpSweep(): Promise<void> {
       try {
         const result = await advanceSession(session.id, bars);
         if (result.kind === "advanced") {
-          publishAdvanced(session.id, result.updatedAt, result.lastBar);
+          publishAdvanced(session.id, result.updatedAt, result.lastBar, result.bars);
         }
       } finally {
         trackEnd();

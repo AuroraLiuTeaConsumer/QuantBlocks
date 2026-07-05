@@ -41,12 +41,14 @@
 **Request**: `{ name, description?, timeframe?, nodes?, edges? }` — only `name` is required  
 **Response**: Strategy object (201). Defaults: `instrument=BTC-PERP`, `timeframe=1h`.  
 **Notes**: No `validateGraph` on create — blank canvas (`nodes`/`edges` omitted or `[]`) is valid. Graph validation runs when starting a backtest or applying AI output.
+**Timeframe validation**: If `timeframe` is provided (non-null), it must be one of the values in the `TIMEFRAMES` tuple (`"1m","3m","5m","15m","30m","1h","4h","1d"`). Invalid values return `400` before any Prisma operation. If `timeframe` is omitted, it defaults to `"1h"`.
 
 ### PUT `/api/strategies/[id]`
 
 **Request**: `{ name?, description?, timeframe?, nodes?, edges? }`  
 **Response**: Strategy object  
 **Notes**: Saves incremental canvas edits without graph validation. Invalid graphs are rejected at backtest start (`400` with validation errors).
+**Timeframe validation**: If `timeframe` is present in the request body, it must be one of the `TIMEFRAMES` values. Invalid values return `400` before any Prisma operation; the existing `timeframe` on the strategy is unchanged. Changing to a different timeframe while a paper session is running returns `409`.
 
 ### POST `/api/strategies/[id]/backtests`
 

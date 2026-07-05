@@ -20,15 +20,6 @@ export type BarItem = {
 
 // ─── Synthetic fallback ───────────────────────────────────────────────────────
 
-const TIMEFRAME_SECONDS: Record<string, number> = {
-  "1m": 60,
-  "5m": 300,
-  "15m": 900,
-  "1h": 3_600,
-  "4h": 14_400,
-  "1d": 86_400,
-};
-
 function generateSyntheticBars(barSpacingSec: number, limit: number): BarItem[] {
   const nowSec = Math.floor(Date.now() / 1_000);
   const startSec = nowSec - (limit - 1) * barSpacingSec;
@@ -208,9 +199,9 @@ export async function GET(
 
   // ── Synthetic fallback ───────────────────────────────────────────────────
 
-  const barSpacingSec =
-    TIMEFRAME_SECONDS[timeframeParam.toLowerCase()] ??
-    TIMEFRAME_SECONDS[DEFAULT_TIMEFRAME];
+  const barSpacingSec = isTimeframe(timeframeParam)
+    ? TIMEFRAME_MS[timeframeParam] / 1000
+    : TIMEFRAME_MS["1h"] / 1000;
 
   const bars = generateSyntheticBars(barSpacingSec, limit);
 

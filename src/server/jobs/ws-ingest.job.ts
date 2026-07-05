@@ -7,11 +7,11 @@
  *
  * Usage:
  *   npm run ws:ingest
- *   npm run ws:ingest -- --symbols BTCUSDT,ETHUSDT --timeframe 1m
+ *   npm run ws:ingest -- --symbols BTCUSDT,ETHUSDT --timeframe 1m,5m,15m
  *
  * Options:
  *   --symbols    Comma-separated Binance symbols (default: BTCUSDT)
- *   --timeframe  Kline interval (default: 1m)
+ *   --timeframe  Comma-separated kline intervals (default: 1m)
  *
  * Prerequisites:
  *   1. docker-compose up -d
@@ -22,12 +22,15 @@
  *   - Only closed candles (k.x === true) are written to the DB.
  *   - Auto-reconnects with exponential backoff (max 60 s) on unexpected close.
  *   - Inserts are idempotent: ON CONFLICT DO NOTHING in TimescaleDB.
+ *   - Subscribes to the cartesian product of symbols × timeframes in one combined stream.
+ *   - Each candle's timeframe is read from k.i (the payload), not a module-level variable.
  */
 
 // Load .env before any imports that read process.env
 import "./load-env";
 
 import { getTimescaleRepo } from "../../lib/market-data/storage/timescale.repo";
+import { isTimeframe, TIMEFRAMES } from "../../lib/market-data/types";
 import type { Candle, Timeframe } from "../../lib/market-data/types";
 import { getRedisPublisher } from "../../lib/redis/client";
 import { candleChannel, encodeCandleMsg } from "../../lib/redis/channels";
@@ -43,8 +46,9 @@ function parseArgs() {
 
   const symbolsRaw = flag("--symbols", "BTCUSDT");
   const symbols = symbolsRaw.split(",").map((s) => s.trim().toLowerCase());
-  const timeframe = flag("--timeframe", "1m") as Timeframe;
-  return { symbols, timeframe };
+  const timeframesRaw = flag("--timeframe", "1m");
+  const timeframes = timeframesRaw.split(",").map((s) => s.trim());
+  return { symbols, timeframes };
 }
 
 // ─── Binance stream types ─────────────────────────────────────────────────────
@@ -110,8 +114,10 @@ process.on("SIGTERM", () => {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-function connect(symbols: string[], timeframe: string) {
-  const streams = symbols.map((s) => `${s}@kline_${timeframe}`).join("/");
+function connect(symbols: string[], timeframes: string[]) {
+  const streams = symbols
+    .flatMap((s) => timeframes.map((tf) => `${s}@kline_${tf}`))
+    .join("/");
   const url = `wss://fstream.binance.com/stream?streams=${streams}`;
 
   console.log(`[ws-ingest] Connecting to: ${url}`);
@@ -119,7 +125,9 @@ function connect(symbols: string[], timeframe: string) {
   const ws = new WebSocket(url);
 
   ws.addEventListener("open", () => {
-    console.log(`[ws-ingest] Connected. Watching ${symbols.length} stream(s) @ ${timeframe}.`);
+    console.log(
+      `[ws-ingest] Connected. Watching ${symbols.length} symbol(s) × ${timeframes.length} timeframe(s).`,
+    );
     backoffMs = BASE_BACKOFF_MS; // reset on successful connect
   });
 
@@ -134,6 +142,14 @@ function connect(symbols: string[], timeframe: string) {
     const k = msg.data?.k;
     if (!k || !k.x) return; // only process closed candles
 
+    // Use k.i as the authoritative timeframe for this candle — the combined stream
+    // carries multiple timeframes, so we cannot rely on a module-level variable.
+    const tf = k.i;
+    if (!isTimeframe(tf)) {
+      console.warn(`[ws-ingest] Received unknown timeframe '${tf}' — skipping.`);
+      return;
+    }
+
     const ccxtSymbol = binanceSymbolToCcxt(k.s.toLowerCase());
     const openTime = new Date(k.t);
     const closeTime = new Date(k.T);
@@ -141,7 +157,7 @@ function connect(symbols: string[], timeframe: string) {
     const candle: Candle = {
       exchange: "binance",
       symbol: ccxtSymbol,
-      timeframe: timeframe as Timeframe,
+      timeframe: tf as Timeframe,
       openTime,
       closeTime,
       open: parseFloat(k.o),
@@ -159,15 +175,26 @@ function connect(symbols: string[], timeframe: string) {
       const inserted = await repo.insertCandles([candle]);
       getRedisPublisher()
         .publish(
-          candleChannel("binance", ccxtSymbol, timeframe),
-          encodeCandleMsg({ exchange: "binance", symbol: ccxtSymbol, timeframe, openTime: candle.openTime.getTime(), open: candle.open, high: candle.high, low: candle.low, close: candle.close }),
+          candleChannel("binance", ccxtSymbol, tf),
+          encodeCandleMsg({
+            exchange: "binance",
+            symbol: ccxtSymbol,
+            timeframe: tf,
+            openTime: candle.openTime.getTime(),
+            open: candle.open,
+            high: candle.high,
+            low: candle.low,
+            close: candle.close,
+          }),
         )
         .catch((err: unknown) => {
-          console.warn(`[ws-ingest] Redis publish failed: ${err instanceof Error ? err.message : String(err)}`);
+          console.warn(
+            `[ws-ingest] Redis publish failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
         });
       const ts = openTime.toISOString().slice(0, 19).replace("T", " ");
       console.log(
-        `[ws-ingest] ${inserted > 0 ? "✓" : "~"} ${ccxtSymbol} ${ts} close=${candle.close}`,
+        `[ws-ingest] ${inserted > 0 ? "✓" : "~"} ${ccxtSymbol} ${tf} ${ts} close=${candle.close}`,
       );
     } catch (err) {
       console.error("[ws-ingest] DB insert error:", err instanceof Error ? err.message : err);
@@ -184,7 +211,7 @@ function connect(symbols: string[], timeframe: string) {
       console.log(`[ws-ingest] Reconnecting in ${backoffMs / 1000}s…`);
       setTimeout(() => {
         backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
-        connect(symbols, timeframe);
+        connect(symbols, timeframes);
       }, backoffMs);
     }
   });
@@ -192,15 +219,25 @@ function connect(symbols: string[], timeframe: string) {
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
-const { symbols, timeframe } = parseArgs();
+const { symbols, timeframes } = parseArgs();
+
+// Validate every requested timeframe against the canonical TIMEFRAMES list
+const invalidTimeframes = timeframes.filter((tf) => !isTimeframe(tf));
+if (invalidTimeframes.length > 0) {
+  console.error(
+    `[ws-ingest] Invalid timeframe(s): ${invalidTimeframes.join(", ")}. ` +
+      `Valid values: ${TIMEFRAMES.join(", ")}`,
+  );
+  process.exit(1);
+}
 
 console.log("═══════════════════════════════════════════════════════════");
 console.log("  QuantBlocks — WebSocket Live Candle Ingestion");
 console.log("═══════════════════════════════════════════════════════════");
-console.log(`  Symbols   : ${symbols.join(", ")}`);
-console.log(`  Timeframe : ${timeframe}`);
-console.log(`  Exchange  : Binance USDT-M futures`);
+console.log(`  Symbols    : ${symbols.join(", ")}`);
+console.log(`  Timeframes : ${timeframes.join(", ")}`);
+console.log(`  Exchange   : Binance USDT-M futures`);
 console.log("  Press Ctrl-C to stop.");
 console.log("───────────────────────────────────────────────────────────\n");
 
-connect(symbols, timeframe);
+connect(symbols, timeframes);

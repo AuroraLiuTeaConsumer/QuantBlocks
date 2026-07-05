@@ -2,3 +2,4 @@
 - [QuantBlocks Constraints](project_constraints.md) — hard non-goals from HANDOFF.md: no migrate dev, don't touch engine, raw-SQL migration protocol
 - [advance.ts Idempotency Design](project_advance_idempotency.md) — Phase 4 two-guard contract, source-agnostic advance, auto-stop as caller policy
 - [Worker/Poll Mode Split](project_worker_mode_split.md) — mode=poll vs worker contract; start route + poll auto-stop must be mode-gated; REDIS_URL prereq
+- [Timeframe Model](project_timeframe_model.md) — timeframe is Strategy-level; backend already fully tf-parametric, gaps are frontend UI + ws-ingest multi-tf

@@ -10,6 +10,7 @@ import { PaperTradingPanel } from "./PaperTradingPanel";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { StrategyGraphSchema } from "@/lib/strategy/graphTypes";
 import type { StrategyGraph, StrategyNode, StrategyEdge } from "@/lib/strategy/graphTypes";
+import { TIMEFRAMES } from "@/lib/market-data/types";
 
 type BottomTab = "backtest" | "paper";
 
@@ -62,6 +63,76 @@ function SaveStatus({
   );
 }
 
+function TimeframeStrip({
+  value,
+  disabled,
+  paperSessionBusy,
+  onChange,
+}: {
+  value: string;
+  disabled: boolean;
+  paperSessionBusy: boolean;
+  onChange: (timeframe: string) => void;
+}) {
+  const disabledReason = paperSessionBusy
+    ? "Stop the paper session to change timeframe."
+    : "Saving timeframe…";
+
+  return (
+    <div
+      className="flex min-w-0 items-center gap-1.5"
+      title={disabled ? disabledReason : "Chart timeframe"}
+    >
+      <span className="hidden shrink-0 items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-3 lg:flex">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.25"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="6" cy="6" r="4.5" />
+          <path d="M6 3.5V6l1.75 1" />
+        </svg>
+        Interval
+      </span>
+      <div className="min-w-0 overflow-x-auto">
+        <div
+          role="group"
+          aria-label="Chart timeframe"
+          aria-busy={disabled && !paperSessionBusy}
+          className="flex w-max items-center gap-0.5 rounded-md border border-line bg-surface-alt p-0.5"
+        >
+          {TIMEFRAMES.map((timeframe) => {
+            const active = timeframe === value;
+            return (
+              <button
+                key={timeframe}
+                type="button"
+                aria-label={`Use ${timeframe} timeframe`}
+                aria-pressed={active}
+                disabled={disabled}
+                onClick={() => onChange(timeframe)}
+                className={`min-w-8 shrink-0 rounded px-1.5 py-1 font-mono text-[11px] font-semibold leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
+                  active
+                    ? "bg-accent text-white shadow-[0_1px_3px_rgba(41,98,255,0.3)]"
+                    : "text-ink-2 hover:bg-surface hover:text-ink-1"
+                } disabled:cursor-not-allowed ${active ? "" : "disabled:opacity-45"}`}
+              >
+                {timeframe}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStrategy }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [draftGraph, setDraftGraph] = useState<StrategyGraph | null>(null);
@@ -74,6 +145,18 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [drawerHeight, setDrawerHeight] = useState(DEFAULT_DRAWER);
   const [drawerCollapsed, setDrawerCollapsed] = useState(false);
+
+  // Editable timeframe — synced from strategy prop on mount/strategy change
+  const [currentTimeframe, setCurrentTimeframe] = useState(strategy.timeframe);
+  const [isTimeframeSaving, setIsTimeframeSaving] = useState(false);
+  const [paperSessionBusy, setPaperSessionBusy] = useState(false);
+  const timeframeRequestRef = useRef(0);
+  const timeframeSavingRef = useRef(false);
+
+  // Sync currentTimeframe if the server prop changes (e.g. full-page re-render)
+  useEffect(() => {
+    setCurrentTimeframe(strategy.timeframe);
+  }, [strategy.timeframe]);
 
   const parsedFromServer = useMemo(
     () => parseStrategyGraph(strategy),
@@ -107,6 +190,48 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
   };
 
   const handleCancelDraft = () => setDraftGraph(null);
+
+  const handleTimeframeChange = async (newTf: string) => {
+    if (timeframeSavingRef.current || newTf === currentTimeframe) return;
+
+    const prevTf = currentTimeframe;
+    const requestId = ++timeframeRequestRef.current;
+    timeframeSavingRef.current = true;
+    setCurrentTimeframe(newTf);
+    setIsTimeframeSaving(true);
+    setSaveError(null);
+    setSaveStatus("saving");
+    try {
+      const res = await fetch(`/api/strategies/${strategy.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timeframe: newTf }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        if (requestId !== timeframeRequestRef.current) return;
+        setCurrentTimeframe(prevTf);
+        setSaveError(data.error ?? "Failed to update timeframe");
+        setSaveStatus("error");
+      } else {
+        const data = await res.json() as { timeframe?: string };
+        if (requestId !== timeframeRequestRef.current) return;
+        if (data.timeframe) setCurrentTimeframe(data.timeframe);
+        setSaveStatus("saved");
+        setTimeout(() => setSaveStatus("idle"), 2500);
+      }
+    } catch {
+      if (requestId !== timeframeRequestRef.current) return;
+      setCurrentTimeframe(prevTf);
+      setSaveError("Network error updating timeframe");
+      setSaveStatus("error");
+    } finally {
+      if (requestId === timeframeRequestRef.current) {
+        timeframeSavingRef.current = false;
+        setIsTimeframeSaving(false);
+      }
+    }
+  };
 
   // Drawer resize
   const dragRef = useRef({ active: false, startY: 0, startH: DEFAULT_DRAWER });
@@ -144,7 +269,7 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
       <header className="flex h-[44px] shrink-0 items-center gap-3.5 border-b border-line bg-surface px-3.5">
         <Link
           href="/strategies"
-          className="flex items-center gap-1 text-xs text-ink-2 transition-colors hover:text-ink-1"
+          className="flex shrink-0 items-center gap-1 text-xs text-ink-2 transition-colors hover:text-ink-1"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M9 2.5 4.5 7 9 11.5" />
@@ -152,14 +277,21 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
           Strategies
         </Link>
         <div className="h-[18px] w-px bg-line" />
-        <span className="text-sm font-bold text-ink-1">{strategy.name}</span>
-        <div className="flex items-center gap-1.5 rounded-md border border-line bg-surface-alt px-2 py-0.5">
+        <span className="max-w-48 truncate text-sm font-bold text-ink-1">{strategy.name}</span>
+        <div className="flex shrink-0 items-center rounded-md border border-line bg-surface-alt px-2 py-1">
           <span className="font-mono text-[11px] font-semibold text-ink-1">{strategy.instrument}</span>
-          <span className="text-[11px] text-ink-3">·</span>
-          <span className="font-mono text-[11px] text-ink-2">{strategy.timeframe}</span>
         </div>
-        <div className="flex-1" />
-        <SaveStatus status={saveStatus} />
+        <div className="min-w-0 flex-1">
+          <TimeframeStrip
+            value={currentTimeframe}
+            disabled={paperSessionBusy || isTimeframeSaving}
+            paperSessionBusy={paperSessionBusy}
+            onChange={handleTimeframeChange}
+          />
+        </div>
+        <div className="shrink-0">
+          <SaveStatus status={saveStatus} />
+        </div>
       </header>
 
       {/* Apply-draft banner */}
@@ -331,7 +463,7 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
                 <ErrorBoundary label="Backtest">
                   <BacktestPanel
                     strategyId={strategy.id}
-                    strategyTimeframe={strategy.timeframe}
+                    strategyTimeframe={currentTimeframe}
                     disableRun={isCanvasSaving || hasPendingApply}
                   />
                 </ErrorBoundary>
@@ -341,6 +473,7 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
                   <PaperTradingPanel
                     strategyId={strategy.id}
                     disableRun={isCanvasSaving || hasPendingApply}
+                    onSessionBusyChange={setPaperSessionBusy}
                   />
                 </ErrorBoundary>
               </div>

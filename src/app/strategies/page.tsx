@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { TIMEFRAMES } from "@/lib/market-data/types";
 
 type Strategy = {
   id: string;
@@ -58,6 +59,7 @@ export default function StrategiesPage() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newTimeframe, setNewTimeframe] = useState<string>("1h");
   const [submitting, setSubmitting] = useState(false);
 
   // Initial fetch
@@ -88,7 +90,7 @@ export default function StrategiesPage() {
           name: newName.trim(),
           nodes: [],
           edges: [],
-          timeframe: "1h",
+          timeframe: newTimeframe,
         }),
       });
       const data = await res.json();
@@ -97,6 +99,8 @@ export default function StrategiesPage() {
         setSubmitting(false);
         return;
       }
+      setNewName("");
+      setNewTimeframe("1h");
       router.push(`/strategies/${data.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Network error");
@@ -155,17 +159,29 @@ export default function StrategiesPage() {
                   if (e.key === "Escape") {
                     setCreating(false);
                     setNewName("");
+                    setNewTimeframe("1h");
                   }
                 }}
                 placeholder="Strategy name…"
                 disabled={submitting}
                 className="flex-1 rounded-md border-[1.5px] border-line-strong bg-surface-alt px-2.5 py-1.5 text-xs text-ink-1 outline-none transition-colors focus:border-accent"
               />
+              <select
+                value={newTimeframe}
+                onChange={(e) => setNewTimeframe(e.target.value)}
+                disabled={submitting}
+                className="rounded-md border-[1.5px] border-line-strong bg-surface-alt px-2.5 py-1.5 text-xs text-ink-1 outline-none transition-colors focus:border-accent"
+              >
+                {TIMEFRAMES.map((tf) => (
+                  <option key={tf} value={tf}>{tf}</option>
+                ))}
+              </select>
               <button
                 type="button"
                 onClick={() => {
                   setCreating(false);
                   setNewName("");
+                  setNewTimeframe("1h");
                 }}
                 className="rounded-md border border-line-strong bg-surface px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-surface-alt"
               >

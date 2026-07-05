@@ -58,9 +58,15 @@ The PaperTradingPanel header shows:
 - **Replay from** date picker (when not running): optional start date for historical replay
 - **Restoring spinner** on mount while checking for an existing session
 
+## Timeframe Selection
+
+The strategy's `timeframe` field is user-selectable. In the strategies list, a `<select>` populated from the canonical `TIMEFRAMES` tuple (`"1m","3m","5m","15m","30m","1h","4h","1d"`) lets the user choose a timeframe when creating a new strategy (defaults to `"1h"`). The workspace header uses a trading-style segmented interval strip with one-click buttons and a highlighted active timeframe. Changing it calls `PUT /api/strategies/:id` optimistically and reverts on error. Both `POST /api/strategies` and `PUT /api/strategies/:id` validate the supplied timeframe against the `TIMEFRAMES` enum at write time (returning `400` for invalid values), so the runtime paper/backtest routes no longer receive invalid timeframes.
+
+The workspace disables the interval strip while a paper session is starting or running. `PaperTradingPanel` reports live session status to the workspace, so the buttons are re-enabled after stop/reset without a page reload. The `PUT /api/strategies/:id` route also rejects an actual timeframe change with `409` while a running paper session exists.
+
 ## Instrument Resolution
 
-Paper sessions inherit `instrument` and `timeframe` from the strategy. The poll route resolves via `INSTRUMENT_MAP` (e.g. `BTC-PERP` → Binance `BTC/USDT:USDT`). If the instrument is unmapped or has no TimescaleDB data, the poll returns the current snapshot unchanged (session stalls until data is ingested).
+Paper sessions inherit `instrument` and `timeframe` from the strategy at session start. The poll route resolves via `INSTRUMENT_MAP` (e.g. `BTC-PERP` → Binance `BTC/USDT:USDT`). If the instrument is unmapped or has no TimescaleDB data, the poll returns the current snapshot unchanged (session stalls until data is ingested).
 
 ## Concurrency
 

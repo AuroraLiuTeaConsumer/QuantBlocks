@@ -128,9 +128,11 @@ function StatCard({
 export function PaperTradingPanel({
   strategyId,
   disableRun = false,
+  onSessionBusyChange,
 }: {
   strategyId: string;
   disableRun?: boolean;
+  onSessionBusyChange?: (busy: boolean) => void;
 }) {
   const [session, setSession] = useState<SessionSnapshot | null>(null);
   const [trades, setTrades] = useState<PaperTrade[]>([]);
@@ -469,6 +471,11 @@ export function PaperTradingPanel({
 
   const status = session?.status ?? "idle";
   const isRunning = status === "running";
+
+  useEffect(() => {
+    onSessionBusyChange?.(isRunning || loading);
+  }, [isRunning, loading, onSessionBusyChange]);
+
   const canStart = !isRunning && !disableRun && !loading;
   const canStop = isRunning;
   const canReset = session != null && !isRunning;

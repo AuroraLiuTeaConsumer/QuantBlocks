@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { isTimeframe, TIMEFRAMES } from "@/lib/market-data/types";
 
 // POST /api/strategies — create strategy
 export async function POST(req: NextRequest) {
@@ -8,6 +9,13 @@ export async function POST(req: NextRequest) {
 
   if (!name) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
+  }
+
+  if (timeframe != null && !isTimeframe(timeframe)) {
+    return NextResponse.json(
+      { error: "Invalid timeframe. Must be one of: " + TIMEFRAMES.join(", ") },
+      { status: 400 },
+    );
   }
 
   const strategy = await prisma.strategy.create({

@@ -194,6 +194,7 @@ export function BacktestPanel({
   const strategyTimeframeRef = useRef(strategyTimeframe);
   const runStrategyIdRef = useRef<string | null>(null);
   const runStrategyTimeframeRef = useRef<string | null>(null);
+  const previousTimeframeRef = useRef(strategyTimeframe);
 
   strategyIdRef.current = strategyId;
   strategyTimeframeRef.current = strategyTimeframe;
@@ -204,6 +205,24 @@ export function BacktestPanel({
       pollTimerRef.current = null;
     }
   }, []);
+
+  useEffect(() => {
+    if (previousTimeframeRef.current === strategyTimeframe) return;
+    previousTimeframeRef.current = strategyTimeframe;
+    stopPolling();
+    runStrategyIdRef.current = null;
+    runStrategyTimeframeRef.current = null;
+    setRunId(null);
+    setMetrics(null);
+    setEquityCurve([]);
+    setTrades([]);
+    setBars(undefined);
+    setBarsUnavailable(false);
+    setError(null);
+    setDataSourceLabel(null);
+    setDataQuality(null);
+    setStatus("idle");
+  }, [strategyTimeframe, stopPolling]);
 
   useEffect(() => {
     mountedRef.current = true;

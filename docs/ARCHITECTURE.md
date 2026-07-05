@@ -111,7 +111,11 @@ LongShortRatioIngestionService → TimescaleRepository.insertLongShortRatios() (
 
 WebSocket live ingestion (ws-ingest.job.ts)
   Binance USDT-M kline stream (native Node.js WebSocket)
+  --timeframe accepts a comma-separated list (e.g. "1m,5m,15m"); default "1m"
+  Subscribes to cartesian product of symbols × timeframes in one combined stream
+  Each candle's timeframe is read from k.i (the payload), not a module-level var
   → TimescaleRepository.insertCandles() on each closed candle
+  → Redis publish on candleChannel("binance", symbol, tf) per closed candle
 
                 │
                 ▼

@@ -59,6 +59,7 @@ export type TwoPaneChartHandle = {
   appendPrice: (point: PricePoint) => void;
   appendBar: (bar: BarItem) => void;
   initBars: (bars: BarItem[]) => void;
+  replaceBars: (bars: BarItem[]) => void;
   setMarkers: (markers: ChartMarker[]) => void;
   reset: () => void;
 };
@@ -427,6 +428,22 @@ export const TwoPaneChart = forwardRef(function TwoPaneChart(
       );
       topChartRef.current?.timeScale().fitContent();
       bottomChartRef.current?.timeScale().fitContent();
+    },
+
+    replaceBars(bars: BarItem[]) {
+      const series = candlestickRef.current;
+      if (!series) return;
+      const sorted = [...bars].sort((a, b) => a.time - b.time);
+      series.setData(
+        sorted.map((b) => ({
+          time: b.time as Time,
+          open: b.open,
+          high: b.high,
+          low: b.low,
+          close: b.close,
+        })),
+      );
+      topChartRef.current?.timeScale().scrollToRealTime();
     },
 
     setMarkers(markers: ChartMarker[]) {

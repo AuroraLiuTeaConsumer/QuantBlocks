@@ -104,6 +104,24 @@ export interface EngineState {
   equity: number;
   initialEquity: number;
   realizedPnl: number;
+  /** Compact running statistics used by persistent paper-trading metrics. */
+  performance?: PerformanceAccumulator;
+}
+
+export interface PerformanceAccumulator {
+  barCount: number;
+  returnSum: number;
+  returnSumSquares: number;
+  downsideSumSquares: number;
+  peakEquity: number;
+  maxDrawdownPct: number;
+  firstClose: number | null;
+  lastClose: number | null;
+  closedTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  grossProfit: number;
+  grossLoss: number;
 }
 
 export interface PositionState {

@@ -3,6 +3,7 @@ import { compileGraph, step, createInitialState } from "@/lib/strategy/engine";
 import type { EngineState, Bar } from "@/lib/strategy/engine";
 import type { StrategyGraph } from "@/lib/strategy/graphTypes";
 import type { Prisma } from "@prisma/client";
+import { recordPaperBar } from "./metrics";
 
 export type LastBar = {
   time: number;
@@ -136,8 +137,19 @@ export async function advanceSession(
       };
       newBarCursor = rb.openTime;
 
+      const previousEquity = engineState.equity;
       const result = step(compiled.value, bar, engineState);
       engineState = result.state;
+      engineState.performance = recordPaperBar(
+        engineState.performance,
+        engineState.initialEquity,
+        previousEquity,
+        engineState.equity,
+        bar.close,
+        result.events
+          .filter((event) => event.kind === "CLOSED")
+          .map((event) => event.pnl),
+      );
       lastPrice = bar.close;
       lastBar = {
         time: bar.timeSec,

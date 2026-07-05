@@ -56,6 +56,7 @@ async function fetchSession(sessionId: string): Promise<SessionRow | null> {
       updatedAt: true,
       mode: true,
       replaySpeed: true,
+      engineState: true,
     },
   });
   return row as SessionRow | null;

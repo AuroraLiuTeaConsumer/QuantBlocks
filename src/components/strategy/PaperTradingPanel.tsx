@@ -8,6 +8,8 @@ import {
   type BarItem,
 } from "./TwoPaneChart";
 import { usePaperStream } from "./usePaperStream";
+import { ChartIntervalSelector } from "./ChartIntervalSelector";
+import { isTimeframe, TIMEFRAME_MS } from "@/lib/market-data/types";
 
 const POLL_SESSION_MS = 1000;
 const POLL_TRADES_MS = 3000;
@@ -35,6 +37,19 @@ type SessionSnapshot = {
   updatedAt: string;
   mode?: string;
   replaySpeed?: number | null;
+  metrics?: {
+    totalReturnPct: number;
+    netPnl: number;
+    maxDrawdownPct: number;
+    winRate: number;
+    numberOfTrades: number;
+    sharpe: number;
+    sortino: number;
+    calmar: number;
+    benchmarkReturnPct: number;
+    fundingCostPaid: number;
+  };
+  metricsHistoryAvailable?: boolean;
   lastBar?: {
     time: number;
     open: number;
@@ -82,6 +97,11 @@ function formatNum(v: number | null | undefined, digits = 2): string {
   return v.toLocaleString(undefined, { maximumFractionDigits: digits });
 }
 
+function formatPct(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return "—";
+  return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+}
+
 function formatTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   try {
@@ -99,6 +119,20 @@ function pnlColor(v: number): string {
   if (v > 0) return "var(--green)";
   if (v < 0) return "var(--red)";
   return "var(--text-2)";
+}
+
+function displayWindowOptions(snap: SessionSnapshot, displayTimeframe: string) {
+  const executionMs = isTimeframe(snap.timeframe)
+    ? TIMEFRAME_MS[snap.timeframe]
+    : 0;
+  const displayMs = isTimeframe(displayTimeframe)
+    ? TIMEFRAME_MS[displayTimeframe]
+    : 0;
+  const hasProcessedBar = Boolean(snap.lastBar || snap.bars?.length);
+  return {
+    endOffsetMs: hasProcessedBar ? executionMs : 0,
+    forceResample: displayMs > executionMs && executionMs > 0,
+  };
 }
 
 function StatCard({
@@ -127,10 +161,12 @@ function StatCard({
 
 export function PaperTradingPanel({
   strategyId,
+  strategyTimeframe = "1h",
   disableRun = false,
   onSessionBusyChange,
 }: {
   strategyId: string;
+  strategyTimeframe?: string;
   disableRun?: boolean;
   onSessionBusyChange?: (busy: boolean) => void;
 }) {
@@ -141,6 +177,9 @@ export function PaperTradingPanel({
   const [restoring, setRestoring] = useState(true);
   const [replayFrom, setReplayFrom] = useState("");
   const [replaySpeed, setReplaySpeed] = useState<string>(""); // "" = realtime
+  const [chartTimeframe, setChartTimeframe] = useState(strategyTimeframe);
+  const [chartBarsLoading, setChartBarsLoading] = useState(false);
+  const [chartBarsUnavailable, setChartBarsUnavailable] = useState(false);
 
   const mountedRef = useRef(true);
   const sessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -151,6 +190,9 @@ export function PaperTradingPanel({
   const seenTradeIdsRef = useRef(new Set<string>());
   const seenExitIdsRef = useRef(new Set<string>());
   const allMarkersRef = useRef<ChartMarker[]>([]);
+  const chartTimeframeRef = useRef(strategyTimeframe);
+  const chartBarsRequestRef = useRef(0);
+  const lastDisplayCursorRef = useRef<string | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -169,7 +211,9 @@ export function PaperTradingPanel({
       let latestTime = lastEquityTimeRef.current;
       for (const bar of bars) {
         if (bar.time > latestTime) {
-          chart.appendBar(bar);
+          if (chartTimeframeRef.current === snap.timeframe) {
+            chart.appendBar(bar);
+          }
           chart.appendEquity({ time: bar.time, value: bar.equity ?? snap.equity });
           latestTime = bar.time;
         }
@@ -194,20 +238,78 @@ export function PaperTradingPanel({
   // candlestick series ends up seeded with bars newer than the replay,
   // and the first appendBar() throws "Cannot update oldest data" on every
   // poll forever, freezing the chart while the session keeps running.
-  const fetchAndSeedBars = useCallback(async (stratId: string, timeframe: string, anchor?: string | null) => {
+  const fetchAndSeedBars = useCallback(async (
+    stratId: string,
+    timeframe: string,
+    anchor?: string | null,
+    replace = false,
+    endOffsetMs = 0,
+    forceResample = false,
+  ) => {
+    const requestId = ++chartBarsRequestRef.current;
+    setChartBarsLoading(true);
     try {
       const params = new URLSearchParams({ timeframe, limit: "500" });
-      if (anchor) params.set("end", anchor);
+      if (anchor) {
+        const anchorTime = new Date(anchor).getTime();
+        params.set(
+          "end",
+          endOffsetMs > 0 && Number.isFinite(anchorTime)
+            ? new Date(anchorTime + endOffsetMs).toISOString()
+            : anchor,
+        );
+      }
+      if (forceResample) params.set("resample", "true");
       const res = await fetch(`/api/strategies/${stratId}/bars?${params.toString()}`);
-      if (!res.ok || !mountedRef.current) return;
+      if (
+        !mountedRef.current ||
+        requestId !== chartBarsRequestRef.current ||
+        chartTimeframeRef.current !== timeframe
+      ) return;
+      if (!res.ok) {
+        setChartBarsUnavailable(true);
+        return;
+      }
       const data = await res.json();
-      if (Array.isArray(data) && mountedRef.current) {
-        chartRef.current?.initBars(data as BarItem[]);
+      if (
+        Array.isArray(data) &&
+        mountedRef.current &&
+        requestId === chartBarsRequestRef.current &&
+        chartTimeframeRef.current === timeframe
+      ) {
+        const nextBars = data as BarItem[];
+        if (replace) chartRef.current?.replaceBars(nextBars);
+        else chartRef.current?.initBars(nextBars);
+        setChartBarsUnavailable(nextBars.length === 0);
       }
     } catch {
       // bars are optional context — proceed without
+      if (mountedRef.current && requestId === chartBarsRequestRef.current) {
+        setChartBarsUnavailable(true);
+      }
+    } finally {
+      if (mountedRef.current && requestId === chartBarsRequestRef.current) {
+        setChartBarsLoading(false);
+      }
     }
   }, []);
+
+  const refreshDisplayBars = useCallback((snap: SessionSnapshot) => {
+    const timeframe = chartTimeframeRef.current;
+    if (timeframe === snap.timeframe || !snap.barCursor) return;
+    const refreshKey = `${timeframe}:${snap.barCursor}`;
+    if (lastDisplayCursorRef.current === refreshKey) return;
+    lastDisplayCursorRef.current = refreshKey;
+    const { endOffsetMs, forceResample } = displayWindowOptions(snap, timeframe);
+    void fetchAndSeedBars(
+      snap.strategyId,
+      timeframe,
+      snap.barCursor,
+      true,
+      endOffsetMs,
+      forceResample,
+    );
+  }, [fetchAndSeedBars]);
 
   const syncMarkersFromTrades = useCallback((tradeList: PaperTrade[]) => {
     const chart = chartRef.current;
@@ -250,7 +352,36 @@ export function PaperTradingPanel({
     seenTradeIdsRef.current.clear();
     seenExitIdsRef.current.clear();
     allMarkersRef.current = [];
+    lastDisplayCursorRef.current = null;
+    setChartBarsUnavailable(false);
   }, []);
+
+  const handleChartTimeframeChange = useCallback(async (timeframe: string) => {
+    if (timeframe === chartTimeframeRef.current) return;
+    chartTimeframeRef.current = timeframe;
+    lastDisplayCursorRef.current = null;
+    setChartTimeframe(timeframe);
+    const snap = session;
+    if (!snap) return;
+    const { endOffsetMs, forceResample } = displayWindowOptions(snap, timeframe);
+
+    await fetchAndSeedBars(
+      snap.strategyId,
+      timeframe,
+      snap.barCursor,
+      true,
+      timeframe !== snap.timeframe ? endOffsetMs : 0,
+      timeframe !== snap.timeframe && forceResample,
+    );
+    if (!mountedRef.current || timeframe !== snap.timeframe) return;
+    const latestBar = [...(snap.bars ?? []), ...(snap.lastBar ? [snap.lastBar] : [])]
+      .sort((a, b) => a.time - b.time)
+      .at(-1);
+    if (latestBar) {
+      chartRef.current?.appendBar(latestBar);
+      setChartBarsUnavailable(false);
+    }
+  }, [fetchAndSeedBars, session]);
 
   const stopPolling = useCallback(() => {
     if (sessionPollRef.current) {
@@ -277,7 +408,10 @@ export function PaperTradingPanel({
     setSession((prev) =>
       prev?.status !== "running" && localSnap.status === "running" ? prev : localSnap
     );
-    if (localSnap.status === "running") appendFromSnapshot(localSnap);
+    if (localSnap.status === "running") {
+      appendFromSnapshot(localSnap);
+      refreshDisplayBars(localSnap);
+    }
     if (localSnap.status !== "running") stopPolling();
   });
   // streaming is available for future UI indicators (e.g. a live badge).
@@ -295,13 +429,16 @@ export function PaperTradingPanel({
         setSession((prev) =>
           prev?.status !== "running" && data.status === "running" ? prev : data
         );
-        if (data.status === "running") appendFromSnapshot(data);
+        if (data.status === "running") {
+          appendFromSnapshot(data);
+          refreshDisplayBars(data);
+        }
         if (data.status !== "running") stopPolling();
       } catch {
         // transient
       }
     },
-    [stopPolling, appendFromSnapshot]
+    [stopPolling, appendFromSnapshot, refreshDisplayBars]
   );
 
   const pollTrades = useCallback(
@@ -340,6 +477,10 @@ export function PaperTradingPanel({
     setRestoring(true);
     setSession(null);
     setTrades([]);
+    chartTimeframeRef.current = strategyTimeframe;
+    setChartTimeframe(strategyTimeframe);
+    chartBarsRequestRef.current += 1;
+    lastDisplayCursorRef.current = null;
 
     fetch(`/api/strategies/${strategyId}/paper/session`)
       .then(async (res) => {
@@ -349,7 +490,16 @@ export function PaperTradingPanel({
         if (cancelled) return;
         setSession(snap);
         pollTrades(snap.id);
-        await fetchAndSeedBars(snap.strategyId, snap.timeframe, snap.barCursor);
+        const displayTimeframe = chartTimeframeRef.current;
+        const displayOptions = displayWindowOptions(snap, displayTimeframe);
+        await fetchAndSeedBars(
+          snap.strategyId,
+          displayTimeframe,
+          snap.barCursor,
+          false,
+          displayTimeframe !== snap.timeframe ? displayOptions.endOffsetMs : 0,
+          displayTimeframe !== snap.timeframe && displayOptions.forceResample,
+        );
         if (cancelled) return;
         appendFromSnapshot(snap);
         if (snap.status === "running") startPolling(snap.id);
@@ -358,7 +508,7 @@ export function PaperTradingPanel({
       .catch(() => { if (!cancelled) setRestoring(false); });
 
     return () => { cancelled = true; };
-  }, [strategyId, startPolling, pollTrades, fetchAndSeedBars, appendFromSnapshot]);
+  }, [strategyId, strategyTimeframe, startPolling, pollTrades, fetchAndSeedBars, appendFromSnapshot]);
 
   const handleStart = async () => {
     setError(null);
@@ -395,7 +545,16 @@ export function PaperTradingPanel({
               const snap = (await snapRes.json()) as SessionSnapshot;
               if (mountedRef.current) {
                 setSession(snap);
-                await fetchAndSeedBars(snap.strategyId, snap.timeframe, snap.barCursor);
+                const displayTimeframe = chartTimeframeRef.current;
+                const displayOptions = displayWindowOptions(snap, displayTimeframe);
+                await fetchAndSeedBars(
+                  snap.strategyId,
+                  displayTimeframe,
+                  snap.barCursor,
+                  false,
+                  displayTimeframe !== snap.timeframe ? displayOptions.endOffsetMs : 0,
+                  displayTimeframe !== snap.timeframe && displayOptions.forceResample,
+                );
                 if (!mountedRef.current) return;
                 appendFromSnapshot(snap);
                 if (snap.status === "running") startPolling(snap.id);
@@ -414,7 +573,16 @@ export function PaperTradingPanel({
       setSession(snap);
       setTrades([]);
       setLoading(false);
-      await fetchAndSeedBars(strategyId, snap.timeframe, snap.barCursor);
+      const displayTimeframe = chartTimeframeRef.current;
+      const displayOptions = displayWindowOptions(snap, displayTimeframe);
+      await fetchAndSeedBars(
+        strategyId,
+        displayTimeframe,
+        snap.barCursor,
+        false,
+        displayTimeframe !== snap.timeframe ? displayOptions.endOffsetMs : 0,
+        displayTimeframe !== snap.timeframe && displayOptions.forceResample,
+      );
       if (!mountedRef.current) return;
       appendFromSnapshot(snap);
       if (snap.status === "running") startPolling(snap.id);
@@ -494,6 +662,15 @@ export function PaperTradingPanel({
   })();
 
   const showChart = session != null && status !== "idle";
+  const paperMetrics = session?.metrics;
+  const closedTrades = trades.filter((trade) => trade.exitTime != null);
+  const tradeCount = Math.max(
+    paperMetrics?.numberOfTrades ?? 0,
+    closedTrades.length,
+  );
+  const winRate = closedTrades.length > 0
+    ? closedTrades.filter((trade) => trade.pnl > 0).length / closedTrades.length
+    : paperMetrics?.winRate;
 
   return (
     <div className="flex shrink-0 flex-col">
@@ -592,6 +769,18 @@ export function PaperTradingPanel({
       {/* Chart */}
       {showChart && (
         <div className="border-b border-line">
+          <div className="border-b border-line bg-surface">
+            <ChartIntervalSelector
+              value={chartTimeframe}
+              onChange={(timeframe) => void handleChartTimeframeChange(timeframe)}
+              loading={chartBarsLoading}
+            />
+          </div>
+          {chartBarsUnavailable && (
+            <p className="border-b border-line px-4 py-1 text-[11px] text-warn">
+              No market bars are available for the selected price interval.
+            </p>
+          )}
           <TwoPaneChart
             ref={chartRef}
             mode="paper"
@@ -602,7 +791,67 @@ export function PaperTradingPanel({
         </div>
       )}
 
-      {/* Stats */}
+      {/* Performance metrics — same set and conventions as backtest */}
+      {session && status !== "idle" && paperMetrics && (
+        <div className="grid grid-cols-3 gap-2 border-b border-line px-4 py-3 sm:grid-cols-5">
+          <StatCard
+            label="Return"
+            value={formatPct(paperMetrics.totalReturnPct)}
+            color={pnlColor(paperMetrics.totalReturnPct)}
+          />
+          <StatCard
+            label="Net PnL"
+            value={formatNum(paperMetrics.netPnl)}
+            color={pnlColor(paperMetrics.netPnl)}
+          />
+          <StatCard
+            label="Sharpe"
+            value={session.metricsHistoryAvailable ? formatNum(paperMetrics.sharpe) : "—"}
+            color={session.metricsHistoryAvailable ? pnlColor(paperMetrics.sharpe) : undefined}
+          />
+          <StatCard
+            label="Sortino"
+            value={session.metricsHistoryAvailable ? formatNum(paperMetrics.sortino) : "—"}
+            color={session.metricsHistoryAvailable ? pnlColor(paperMetrics.sortino) : undefined}
+          />
+          <StatCard
+            label="Calmar"
+            value={session.metricsHistoryAvailable ? formatNum(paperMetrics.calmar) : "—"}
+            color={session.metricsHistoryAvailable ? pnlColor(paperMetrics.calmar) : undefined}
+          />
+          <StatCard
+            label="Max DD"
+            value={session.metricsHistoryAvailable ? formatPct(paperMetrics.maxDrawdownPct) : "—"}
+            color={session.metricsHistoryAvailable && paperMetrics.maxDrawdownPct > 0 ? "var(--red)" : undefined}
+          />
+          <StatCard
+            label="Win Rate"
+            value={formatPct(winRate != null ? winRate * 100 : undefined)}
+            color={winRate == null ? undefined : pnlColor(winRate - 0.5)}
+          />
+          <StatCard label="Trades" value={formatNum(tradeCount, 0)} />
+          <StatCard
+            label="Benchmark"
+            value={session.metricsHistoryAvailable ? formatPct(paperMetrics.benchmarkReturnPct) : "—"}
+            color={session.metricsHistoryAvailable ? pnlColor(paperMetrics.benchmarkReturnPct) : undefined}
+          />
+          <StatCard
+            label="Funding"
+            value={
+              paperMetrics.fundingCostPaid !== 0
+                ? `${paperMetrics.fundingCostPaid > 0 ? "-" : "+"}${formatNum(Math.abs(paperMetrics.fundingCostPaid))}`
+                : "—"
+            }
+            color={
+              paperMetrics.fundingCostPaid === 0
+                ? undefined
+                : pnlColor(-paperMetrics.fundingCostPaid)
+            }
+          />
+        </div>
+      )}
+
+      {/* Live account snapshot */}
       {session && status !== "idle" && (
         <div className="grid grid-cols-3 gap-2 border-b border-line px-4 py-3 sm:grid-cols-6">
           <StatCard label="Price" value={formatNum(session.lastPrice, 4)} />

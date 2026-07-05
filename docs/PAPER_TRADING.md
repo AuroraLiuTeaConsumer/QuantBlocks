@@ -64,6 +64,12 @@ The strategy's `timeframe` field is user-selectable. In the strategies list, a `
 
 The workspace disables the interval strip while a paper session is starting or running. `PaperTradingPanel` reports live session status to the workspace, so the buttons are re-enabled after stop/reset without a page reload. The `PUT /api/strategies/:id` route also rejects an actual timeframe change with `409` while a running paper session exists.
 
+The market-price chart has a separate **Price interval** strip. It changes only the displayed OHLC bars and does not mutate the strategy or paper-session timeframe. Backtests refetch the completed run's date range at the selected interval. Paper sessions replace the displayed price series at the current replay cursor while retaining the execution-timeframe equity curve and trade markers; when the display interval differs from the session timeframe, price bars are refreshed as the cursor advances. If the selected interval is not stored directly, the bars endpoint accurately resamples an available finer series; it never splits coarse candles into fabricated finer prices.
+
+## Performance Metrics
+
+Paper trading displays the same performance set as backtesting: return, net PnL, Sharpe, Sortino, Calmar, maximum drawdown, win rate, closed-trade count, benchmark return, and funding cost. The engine state persists a compact performance accumulator (return sums, downside deviation input, high-water mark, trade aggregates, and benchmark endpoints), allowing the metrics to use the backtest formulas and survive page reloads without storing an unbounded equity curve. Live account fields such as current price, equity, realized/unrealized PnL, position, and entry price remain in a separate snapshot row.
+
 ## Instrument Resolution
 
 Paper sessions inherit `instrument` and `timeframe` from the strategy at session start. The poll route resolves via `INSTRUMENT_MAP` (e.g. `BTC-PERP` → Binance `BTC/USDT:USDT`). If the instrument is unmapped or has no TimescaleDB data, the poll returns the current snapshot unchanged (session stalls until data is ingested).

@@ -81,7 +81,7 @@ function TimeframeStrip({
   return (
     <div
       className="flex min-w-0 items-center gap-1.5"
-      title={disabled ? disabledReason : "Chart timeframe"}
+      title={disabled ? disabledReason : "Strategy execution timeframe"}
     >
       <span className="hidden shrink-0 items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-3 lg:flex">
         <svg
@@ -98,12 +98,12 @@ function TimeframeStrip({
           <circle cx="6" cy="6" r="4.5" />
           <path d="M6 3.5V6l1.75 1" />
         </svg>
-        Interval
+        Strategy TF
       </span>
       <div className="min-w-0 overflow-x-auto">
         <div
           role="group"
-          aria-label="Chart timeframe"
+          aria-label="Strategy execution timeframe"
           aria-busy={disabled && !paperSessionBusy}
           className="flex w-max items-center gap-0.5 rounded-md border border-line bg-surface-alt p-0.5"
         >
@@ -113,7 +113,7 @@ function TimeframeStrip({
               <button
                 key={timeframe}
                 type="button"
-                aria-label={`Use ${timeframe} timeframe`}
+                aria-label={`Use ${timeframe} strategy timeframe`}
                 aria-pressed={active}
                 disabled={disabled}
                 onClick={() => onChange(timeframe)}
@@ -472,6 +472,7 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyWorkspaceStr
                 <ErrorBoundary label="Paper Trading">
                   <PaperTradingPanel
                     strategyId={strategy.id}
+                    strategyTimeframe={currentTimeframe}
                     disableRun={isCanvasSaving || hasPendingApply}
                     onSessionBusyChange={setPaperSessionBusy}
                   />

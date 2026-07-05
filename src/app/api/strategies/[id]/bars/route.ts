@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getTimescaleRepo } from "@/lib/market-data/storage/timescale.repo";
-import { resolveInstrument, isTimeframe, TIMEFRAME_MS } from "@/lib/market-data/types";
+import { resolveInstrument, isTimeframe, TIMEFRAMES, TIMEFRAME_MS } from "@/lib/market-data/types";
 import type { Timeframe } from "@/lib/market-data/types";
 
 const DEFAULT_TIMEFRAME = "1h";
@@ -83,6 +83,26 @@ function aggregateBars(bars: BarItem[], limit: number): BarItem[] {
   return aggregated;
 }
 
+/** Build calendar-aligned OHLC bars from a genuinely finer stored series. */
+function resampleBars(bars: BarItem[], timeframeMs: number): BarItem[] {
+  const buckets = new Map<number, BarItem>();
+
+  for (const bar of bars) {
+    const bucketTime = Math.floor((bar.time * 1_000) / timeframeMs) * timeframeMs / 1_000;
+    const current = buckets.get(bucketTime);
+    if (!current) {
+      buckets.set(bucketTime, { ...bar, time: bucketTime });
+      continue;
+    }
+    current.high = Math.max(current.high, bar.high);
+    current.low = Math.min(current.low, bar.low);
+    current.close = bar.close;
+    current.volume = (current.volume ?? 0) + (bar.volume ?? 0);
+  }
+
+  return [...buckets.values()].sort((a, b) => a.time - b.time);
+}
+
 // ─── Route ───────────────────────────────────────────────────────────────────
 
 /**
@@ -91,8 +111,9 @@ function aggregateBars(bars: BarItem[], limit: number): BarItem[] {
  * Returns BarItem[] (time in UTC seconds) for the strategy's instrument.
  *
  * Data priority:
- *   1. TimescaleDB real candles (when data has been ingested for this instrument)
- *   2. Synthetic random-walk bars (fallback — always works, clearly labelled)
+ *   1. Exact TimescaleDB candles for the requested interval
+ *   2. Calendar-aligned resampling from an available finer real series
+ *   3. Synthetic random-walk bars for unanchored requests only
  *
  * The X-Data-Source response header tells the client which source was used.
  */
@@ -108,6 +129,7 @@ export async function GET(
   }
 
   const { searchParams } = new URL(req.url);
+  const forceResample = searchParams.get("resample") === "true";
   const timeframeParam =
     searchParams.get("timeframe") ?? strategy.timeframe ?? DEFAULT_TIMEFRAME;
   const limitRaw = searchParams.get("limit");
@@ -152,16 +174,18 @@ export async function GET(
         ? startParamDate
         : new Date(lastOpenTimeMs - (limit - 1) * timeframeMs);
 
-      const candles = await repo.queryCandles({
-        exchange: mapping.exchange,
-        symbol: mapping.symbol,
-        timeframe: tf,
-        startTime,
-        endTime,
-        // A ranged backtest query must cover the entire run before chart
-        // aggregation. Other callers retain the efficient database limit.
-        ...(hasExplicitStart ? {} : { limit }),
-      });
+      const candles = forceResample
+        ? []
+        : await repo.queryCandles({
+            exchange: mapping.exchange,
+            symbol: mapping.symbol,
+            timeframe: tf,
+            startTime,
+            endTime,
+            // A ranged backtest query must cover the entire run before chart
+            // aggregation. Other callers retain the efficient database limit.
+            ...(hasExplicitStart ? {} : { limit }),
+          });
 
       if (candles.length > 0) {
         const bars = aggregateBars(candles.map((c) => ({
@@ -176,6 +200,53 @@ export async function GET(
         return NextResponse.json(bars, {
           headers: {
             "X-Data-Source": `real:${mapping.exchange}:${mapping.symbol}`,
+          },
+        });
+      }
+
+      // Historical ingestion is strategy-driven, so a selected display
+      // interval may not have its own stored series. A finer stored series can
+      // still produce the requested candles exactly; a coarser one cannot and
+      // must never be split into invented prices.
+      const strategyTf = isTimeframe(strategy.timeframe)
+        ? strategy.timeframe
+        : null;
+      const finerTimeframes = TIMEFRAMES
+        .filter((candidate) => TIMEFRAME_MS[candidate] < timeframeMs)
+        .sort((a, b) => TIMEFRAME_MS[b] - TIMEFRAME_MS[a]);
+      const sourceCandidates = [
+        ...(strategyTf && TIMEFRAME_MS[strategyTf] < timeframeMs
+          ? [strategyTf]
+          : []),
+        ...finerTimeframes,
+      ].filter((candidate, index, all) => all.indexOf(candidate) === index);
+
+      for (const sourceTimeframe of sourceCandidates) {
+        const sourceCandles = await repo.queryCandles({
+          exchange: mapping.exchange,
+          symbol: mapping.symbol,
+          timeframe: sourceTimeframe,
+          startTime,
+          endTime,
+        });
+        if (sourceCandles.length === 0) continue;
+
+        const resampled = resampleBars(
+          sourceCandles.map((c) => ({
+            time: Math.floor(c.openTime.getTime() / 1_000),
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            volume: c.volume,
+          })),
+          timeframeMs,
+        );
+        if (resampled.length === 0) continue;
+
+        return NextResponse.json(aggregateBars(resampled, limit), {
+          headers: {
+            "X-Data-Source": `real:${mapping.exchange}:${mapping.symbol}:resampled-${sourceTimeframe}`,
           },
         });
       }

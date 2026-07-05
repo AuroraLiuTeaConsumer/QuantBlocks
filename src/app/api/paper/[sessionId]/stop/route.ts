@@ -5,6 +5,7 @@ import type { SessionRow } from "@/lib/paper/engine";
 import { forceClose } from "@/lib/strategy/engine";
 import type { EngineState, Bar } from "@/lib/strategy/engine";
 import type { Prisma } from "@prisma/client";
+import { recordPaperClose } from "@/lib/paper/metrics";
 
 export async function POST(
   _req: NextRequest,
@@ -40,6 +41,13 @@ export async function POST(
       close: session.lastPrice,
     };
     const { state: closedState, event } = forceClose(engineState, bar);
+    if (event?.kind === "CLOSED") {
+      closedState.performance = recordPaperClose(
+        closedState.performance,
+        closedState.initialEquity,
+        event.pnl,
+      );
+    }
 
     updateData = {
       status: "stopped",

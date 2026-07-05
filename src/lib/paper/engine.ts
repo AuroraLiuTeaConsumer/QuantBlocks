@@ -5,7 +5,11 @@
  * at /src/lib/strategy/engine/. This module only provides:
  * - SessionRow / SessionSnapshot types
  * - toSnapshot() for API responses
- */
+*/
+
+import type { BacktestMetrics } from "@/lib/backtest/metrics";
+import type { EngineState } from "@/lib/strategy/engine";
+import { computePaperMetrics } from "./metrics";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -30,6 +34,8 @@ export type SessionSnapshot = {
   updatedAt: string;
   mode: string;
   replaySpeed: number | null;
+  metrics: BacktestMetrics;
+  metricsHistoryAvailable: boolean;
   lastBar?: {
     time: number;
     open: number;
@@ -68,11 +74,14 @@ export type SessionRow = {
   updatedAt: Date;
   mode: string;
   replaySpeed: number | null;
+  engineState?: unknown;
 };
 
 // ── Snapshot helper ──────────────────────────────────────────
 
 export function toSnapshot(row: SessionRow): SessionSnapshot {
+  const engineState = row.engineState as EngineState | null | undefined;
+  const initialEquity = engineState?.initialEquity ?? 10_000;
   return {
     id: row.id,
     strategyId: row.strategyId,
@@ -94,5 +103,12 @@ export function toSnapshot(row: SessionRow): SessionSnapshot {
     updatedAt: row.updatedAt.toISOString(),
     mode: row.mode,
     replaySpeed: row.replaySpeed,
+    metrics: computePaperMetrics(
+      engineState?.performance,
+      initialEquity,
+      row.equity,
+      row.timeframe,
+    ),
+    metricsHistoryAvailable: engineState?.performance != null,
   };
 }

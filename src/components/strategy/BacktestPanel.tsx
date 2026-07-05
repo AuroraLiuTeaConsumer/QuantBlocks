@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { TwoPaneChart } from "./TwoPaneChart";
 import type { BarItem } from "./TwoPaneChart";
+import { ChartIntervalSelector } from "./ChartIntervalSelector";
 
 const POLL_INTERVAL_MS = 1500;
 
@@ -183,6 +184,8 @@ export function BacktestPanel({
   const [trades, setTrades] = useState<Trade[]>([]);
   const [bars, setBars] = useState<BarItem[] | undefined>(undefined);
   const [barsUnavailable, setBarsUnavailable] = useState(false);
+  const [barsLoading, setBarsLoading] = useState(false);
+  const [chartTimeframe, setChartTimeframe] = useState(strategyTimeframe);
   const [error, setError] = useState<string | null>(null);
   const [dataSourceLabel, setDataSourceLabel] = useState<string | null>(null);
   const [dataQuality, setDataQuality] = useState<DataQuality | null>(null);
@@ -195,6 +198,13 @@ export function BacktestPanel({
   const runStrategyIdRef = useRef<string | null>(null);
   const runStrategyTimeframeRef = useRef<string | null>(null);
   const previousTimeframeRef = useRef(strategyTimeframe);
+  const chartTimeframeRef = useRef(strategyTimeframe);
+  const barsRequestRef = useRef(0);
+  const completedRangeRef = useRef<{
+    strategyId: string;
+    startTime: string | null;
+    endTime: string | null;
+  } | null>(null);
 
   strategyIdRef.current = strategyId;
   strategyTimeframeRef.current = strategyTimeframe;
@@ -212,12 +222,17 @@ export function BacktestPanel({
     stopPolling();
     runStrategyIdRef.current = null;
     runStrategyTimeframeRef.current = null;
+    chartTimeframeRef.current = strategyTimeframe;
+    completedRangeRef.current = null;
+    barsRequestRef.current += 1;
+    setChartTimeframe(strategyTimeframe);
     setRunId(null);
     setMetrics(null);
     setEquityCurve([]);
     setTrades([]);
     setBars(undefined);
     setBarsUnavailable(false);
+    setBarsLoading(false);
     setError(null);
     setDataSourceLabel(null);
     setDataQuality(null);
@@ -245,6 +260,8 @@ export function BacktestPanel({
     startTime?: string | null,
     endTime?: string | null,
   ) => {
+    const requestId = ++barsRequestRef.current;
+    setBarsLoading(true);
     const params = new URLSearchParams({ timeframe, limit: "2000" });
     if (startTime) params.set("start", startTime);
     if (endTime) {
@@ -252,29 +269,57 @@ export function BacktestPanel({
       // uses an exclusive end boundary, so advance it by 1 ms to include it.
       params.set("end", new Date(new Date(endTime).getTime() + 1).toISOString());
     }
-    const res = await fetch(`/api/strategies/${sid}/bars?${params.toString()}`);
-    if (!mountedRef.current) return;
+    let res: Response;
+    try {
+      res = await fetch(`/api/strategies/${sid}/bars?${params.toString()}`);
+    } catch {
+      if (mountedRef.current && requestId === barsRequestRef.current) {
+        setBars(undefined);
+        setBarsUnavailable(true);
+        setBarsLoading(false);
+      }
+      return;
+    }
+    if (!mountedRef.current || requestId !== barsRequestRef.current) return;
     const stillCurrent =
       runStrategyIdRef.current === sid &&
-      runStrategyTimeframeRef.current === timeframe;
+      chartTimeframeRef.current === timeframe;
     if (!stillCurrent) return;
     if (!res.ok) {
       setBars(undefined);
       setBarsUnavailable(true);
+      setBarsLoading(false);
       return;
     }
     const data = await res.json();
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || requestId !== barsRequestRef.current) return;
     if (
       runStrategyIdRef.current !== sid ||
-      runStrategyTimeframeRef.current !== timeframe
+      chartTimeframeRef.current !== timeframe
     )
       return;
     if (Array.isArray(data)) {
-      setBars(data as BarItem[]);
-      setBarsUnavailable(false);
+      const nextBars = data as BarItem[];
+      setBars(nextBars.length > 0 ? nextBars : undefined);
+      setBarsUnavailable(nextBars.length === 0);
     }
+    setBarsLoading(false);
   }, []);
+
+  const handleChartTimeframeChange = useCallback((timeframe: string) => {
+    if (timeframe === chartTimeframeRef.current) return;
+    chartTimeframeRef.current = timeframe;
+    setChartTimeframe(timeframe);
+    const range = completedRangeRef.current;
+    if (range) {
+      void fetchBars(
+        range.strategyId,
+        timeframe,
+        range.startTime,
+        range.endTime,
+      );
+    }
+  }, [fetchBars]);
 
   const handleRunComplete = useCallback(
     (run: BacktestRun, rid: string) => {
@@ -289,8 +334,13 @@ export function BacktestPanel({
       }
 
       const sid = runStrategyIdRef.current ?? strategyIdRef.current;
-      const tf = runStrategyTimeframeRef.current ?? strategyTimeframeRef.current;
-      fetchBars(sid, tf, run.startTime, run.endTime);
+      const tf = chartTimeframeRef.current;
+      completedRangeRef.current = {
+        strategyId: sid,
+        startTime: run.startTime ?? null,
+        endTime: run.endTime ?? null,
+      };
+      void fetchBars(sid, tf, run.startTime, run.endTime);
 
       const initialCapital = getInitialCapital(run);
       fetchTrades(rid).then(() => {
@@ -364,6 +414,9 @@ export function BacktestPanel({
     setTrades([]);
     setBars(undefined);
     setBarsUnavailable(false);
+    setBarsLoading(false);
+    completedRangeRef.current = null;
+    barsRequestRef.current += 1;
     setDataSourceLabel(null);
     setDataQuality(null);
     setStatus("running");
@@ -560,6 +613,13 @@ export function BacktestPanel({
       {/* Chart */}
       {status === "success" && toChartEquity(equityCurve).length > 0 && (
         <div className="border-b border-line">
+          <div className="border-b border-line bg-surface">
+            <ChartIntervalSelector
+              value={chartTimeframe}
+              onChange={handleChartTimeframeChange}
+              loading={barsLoading}
+            />
+          </div>
           {barsUnavailable && (
             <p className="px-4 py-1 text-[11px] text-warn">
               Price bars unavailable; showing equity only.
